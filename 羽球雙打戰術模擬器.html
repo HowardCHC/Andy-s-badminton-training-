@@ -1,0 +1,2285 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>羽球雙打輪轉與戰術意識視覺化模擬器</title>
+<style>
+/* ═══════════════ 全域佈景：體育館夜燈氛圍 ═══════════════ */
+:root{
+  --court:#0e8b7d;          /* Tiffany 綠球場 */
+  --court-dark:#0a6e63;
+  --line:#f8fafc;
+  --accent:#facc15;
+  --blue:#38bdf8;
+  --orange:#fb923c;
+  --red:#ef4444;
+  --bg:#0f172a;
+  --panel:#1e293b;
+  --panel2:#273449;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  background:radial-gradient(ellipse at 50% 0%,#1e2c4a 0%,var(--bg) 60%);
+  color:#e2e8f0;font-family:"PingFang TC","Microsoft JhengHei",system-ui,sans-serif;
+  min-height:100vh;padding:16px;
+}
+h1{
+  text-align:center;font-size:1.45rem;letter-spacing:.12em;color:var(--accent);
+  text-shadow:0 0 18px rgba(250,204,21,.35);margin-bottom:4px;
+}
+.subtitle{text-align:center;color:#94a3b8;font-size:.8rem;margin-bottom:14px}
+
+/* ═══════════════ 版面骨架 ═══════════════ */
+.wrap{display:flex;gap:16px;justify-content:center;flex-wrap:wrap;max-width:1400px;margin:0 auto}
+
+/* ═══════════════ 3D 立體視角（CSS 3D 透視） ═══════════════ */
+.scene3d-col{display:flex;flex-direction:column;gap:6px}
+.scene-caption{font-size:.8rem;color:#7dd3fc;letter-spacing:.15em;text-align:center}
+.scene3d{
+  width:440px;height:640px;position:relative;border-radius:16px;overflow:hidden;
+  border:1px solid #334155;
+  background:
+    radial-gradient(ellipse at 50% 16%, rgba(125,211,252,.16), transparent 55%),
+    radial-gradient(ellipse at 50% 110%, rgba(14,139,125,.25), transparent 60%),
+    linear-gradient(180deg,#0b1220 0%,#131f3a 48%,#0a1526 100%);
+  perspective:950px;
+}
+.world{
+  position:absolute;left:50%;top:57%;width:380px;height:720px;
+  margin:-360px 0 0 -190px;
+  transform-style:preserve-3d;
+  transform:rotateX(56deg) scale(.94);
+  transform-origin:50% 58%;
+}
+.world > svg{position:absolute;left:0;top:0;
+  filter:drop-shadow(0 0 30px rgba(0,0,0,.55));}
+/* 直立的網子 */
+.net3d{
+  position:absolute;left:28px;top:304px;width:324px;height:46px;
+  transform-origin:50% 100%;transform:rotateX(-90deg);
+  background:
+    linear-gradient(#f8fafc,#f8fafc) top/100% 4px no-repeat,
+    repeating-linear-gradient(90deg, rgba(148,163,184,.75) 0 1.5px, transparent 1.5px 9px),
+    repeating-linear-gradient(0deg, rgba(148,163,184,.75) 0 1.5px, transparent 1.5px 9px);
+  border-left:3px solid #cbd5e1;border-right:3px solid #cbd5e1;
+}
+/* ── 3D 像素小人（Low-poly 交叉板體素風）──
+   容器：站點座標 + rotateZ(朝向)；.fig 直立；正/背/側三面 + 頭部 + 球拍 */
+.p3d{
+  position:absolute;left:0;top:0;width:0;height:0;
+  transform-style:preserve-3d;pointer-events:none;
+  transition:transform .55s cubic-bezier(.25,1.1,.4,1);
+}
+/* 地面朝向箭頭（指向小人正面） */
+.p3d .dir{
+  position:absolute;left:-6px;top:14px;width:0;height:0;
+  border-left:6px solid transparent;border-right:6px solid transparent;
+  border-top:9px solid rgba(250,250,252,.5);   /* 指向小人正面(+Y) */
+}
+.p3d .fig{
+  position:absolute;left:-13px;top:-44px;width:26px;height:44px;
+  transform-origin:50% 100%;transform:rotateX(-90deg);
+  transform-style:preserve-3d;transition:transform .35s;
+}
+.p3d.crouch .fig{transform:rotateX(-90deg) scaleY(.78)}   /* 壓低重心 */
+.p3d .fig i{position:absolute;display:block}
+.p3d .face{
+  inset:0;border-radius:7px 7px 3px 3px;backface-visibility:hidden;
+  background:linear-gradient(180deg,
+    var(--jersey) 0 52%,        /* 球衣 */
+    #1e293b 52% 72%,            /* 短褲 */
+    #ffd9b3 72% 92%,            /* 雙腿 */
+    #f8fafc 92% 100%);          /* 球鞋 */
+}
+.p3d .face.back{transform:rotateY(180deg);filter:brightness(.55)}
+.p3d .face b{
+  position:absolute;left:0;right:0;top:9px;text-align:center;
+  font-size:11px;font-weight:900;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.5);
+}
+.p3d .side{
+  left:50%;top:2px;width:9px;height:42px;margin-left:-4.5px;
+  transform:rotateY(90deg);border-radius:4px;
+  background:linear-gradient(180deg, rgba(0,0,0,.45) 0 55%, rgba(0,0,0,.6) 55%);
+}
+.p3d .headF,.p3d .headB{
+  left:50%;top:-11px;width:15px;height:14px;margin-left:-7.5px;
+  border-radius:50% 50% 44% 44%;backface-visibility:hidden;
+}
+.p3d .headF{background:#ffd9b3}
+.p3d .headF::after{           /* 雙眼：只出現在正面 → 一眼辨識朝向 */
+  content:'';position:absolute;left:3px;top:6px;width:2.5px;height:2.5px;
+  border-radius:50%;background:#1c1917;box-shadow:6.5px 0 0 #1c1917;
+}
+.p3d .headB{background:#42301f;transform:rotateY(180deg)}  /* 後腦勺 */
+.p3d .racket{
+  left:24px;top:4px;width:3.5px;height:17px;border-radius:2px;
+  background:linear-gradient(180deg,#e2e8f0 0 40%, #94a3b8 40%);
+  transform:translateZ(2px) rotateZ(18deg);
+}
+
+/* ── 隨身環形擊球盤（Pie Menu）── */
+#pieMenu{position:absolute;z-index:8;width:0;height:0}
+@keyframes pieIn{from{transform:scale(.2);opacity:0}to{transform:scale(1);opacity:1}}
+.pie-item{
+  position:absolute;width:52px;height:52px;border-radius:50%;
+  background:rgba(15,23,42,.95);border:2px solid var(--accent);color:#e2e8f0;
+  font-size:.6rem;font-weight:800;cursor:pointer;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:0;line-height:1.1;box-shadow:0 4px 16px rgba(0,0,0,.65);
+  animation:pieIn .22s ease-out backwards;
+}
+.pie-item .ico{font-size:1.05rem}
+.pie-item:hover{transform:scale(1.18);border-color:#4ade80;z-index:2}
+
+/* ── 一分球 3D 回放面板 ── */
+#replayPanel{
+  position:absolute;left:8px;right:8px;top:8px;z-index:9;display:none;
+  background:rgba(2,6,23,.88);border:1px solid var(--accent);
+  border-radius:12px;padding:8px 12px;backdrop-filter:blur(3px);
+}
+#replayPanel .rp-row{display:flex;gap:8px;align-items:center}
+#replayPanel .rp-title{color:var(--accent);font-weight:800;font-size:.78rem;white-space:nowrap}
+.rp-btn{
+  background:var(--panel2);border:1px solid #475569;color:#e2e8f0;
+  border-radius:8px;padding:3px 10px;cursor:pointer;font-size:.8rem;
+}
+.rp-btn:hover{border-color:var(--accent)}
+#rpProg{flex:1;height:8px;border-radius:99px;background:#0f172a;overflow:hidden}
+#rpFill{height:100%;width:0%;background:linear-gradient(90deg,#38bdf8,#4ade80);transition:width .3s}
+#replaySub{font-size:.74rem;color:#fde68a;margin-top:5px;min-height:17px;line-height:1.5}
+/* 3D 羽球（黃色球體）與地面影子 */
+.ball3d{
+  position:absolute;left:0;top:0;width:18px;height:18px;border-radius:50%;
+  background:
+    radial-gradient(circle at 34% 28%, rgba(255,255,255,.95), transparent 42%),
+    radial-gradient(circle at 50% 55%, #fde047, #ca8a04);
+  box-shadow:0 0 12px rgba(250,204,21,.85);
+}
+.shadow3d{
+  position:absolute;left:0;top:0;width:22px;height:11px;border-radius:50%;
+  background:#000;filter:blur(2.5px);opacity:.45;
+}
+
+/* ═══════════════ 走位倒數計時（時間壓迫感） ═══════════════ */
+#posTimerFill{
+  height:100%;width:100%;border-radius:99px;
+  background:linear-gradient(90deg,#4ade80,#facc15,#ef4444);
+  transition:width .1s linear;
+}
+@keyframes timerPanic{50%{opacity:.4}}
+.timer-panic{animation:timerPanic .4s infinite;color:var(--red)!important;font-weight:900}
+.court-col{position:relative}
+.panel-col{width:340px;display:flex;flex-direction:column;gap:12px}
+.card{
+  background:var(--panel);border:1px solid #334155;border-radius:14px;
+  padding:12px 14px;box-shadow:0 8px 24px rgba(0,0,0,.35);
+}
+.card h3{font-size:.82rem;color:#7dd3fc;letter-spacing:.15em;margin-bottom:8px}
+
+/* ═══════════════ 頂部設定列 ═══════════════ */
+.settings{
+  max-width:1100px;margin:0 auto 14px;display:flex;gap:10px;flex-wrap:wrap;
+  align-items:center;justify-content:center;background:var(--panel);
+  border:1px solid #334155;border-radius:14px;padding:10px 14px;
+}
+.settings label{font-size:.8rem;color:#94a3b8}
+.settings input[type=number]{
+  width:58px;background:var(--panel2);border:1px solid #475569;color:var(--accent);
+  border-radius:8px;padding:5px 8px;font-size:.95rem;font-weight:700;text-align:center;
+}
+.btn{
+  border:none;border-radius:10px;padding:9px 14px;font-size:.85rem;font-weight:700;
+  cursor:pointer;transition:transform .12s,box-shadow .12s,filter .12s;color:#0f172a;
+}
+.btn:hover:not(:disabled){transform:translateY(-2px);filter:brightness(1.1)}
+.btn:active:not(:disabled){transform:translateY(0)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn-start{background:linear-gradient(135deg,#4ade80,#16a34a);color:#052e16}
+.btn-gold{background:linear-gradient(135deg,#fde047,#f59e0b);color:#451a03}
+.btn-ghost-sm{background:var(--panel2);color:#cbd5e1;border:1px solid #475569}
+
+/* 幽靈區 Toggle */
+.toggle{display:flex;align-items:center;gap:8px;font-size:.8rem;color:#cbd5e1;cursor:pointer;user-select:none}
+.toggle .track{
+  width:44px;height:24px;border-radius:99px;background:#475569;position:relative;transition:background .25s;
+}
+.toggle .knob{
+  position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;
+  background:#e2e8f0;transition:left .25s;
+}
+.toggle input{display:none}
+.toggle input:checked + .track{background:var(--red)}
+.toggle input:checked + .track .knob{left:23px}
+
+/* ═══════════════ 球場 SVG ═══════════════ */
+svg#court{
+  display:block;border-radius:16px;
+  background:linear-gradient(180deg,#123c47 0%,#0d2f38 100%);
+  box-shadow:0 12px 40px rgba(0,0,0,.5), inset 0 0 60px rgba(0,0,0,.4);
+}
+.zone{fill:transparent;transition:fill .2s}
+.zone.targetable{cursor:crosshair}
+.zone.targetable:hover{fill:rgba(250,204,21,.22)}
+.zone.locked{fill:rgba(71,85,105,.45);cursor:not-allowed}   /* 非法落點鎖灰 */
+.pie-item.locked{
+  filter:grayscale(1);opacity:.4;cursor:not-allowed;border-color:#475569;
+}
+.pie-item.locked::after{
+  content:'🔒';position:absolute;right:-2px;top:-2px;font-size:.7rem;
+}
+.pie-item.locked:hover{transform:none;border-color:#475569}
+.zone-label{
+  fill:rgba(248,250,252,.18);font-size:34px;font-weight:900;pointer-events:none;
+  font-family:monospace;text-anchor:middle;dominant-baseline:central;letter-spacing:.05em;
+}
+.row-label{
+  fill:#67e8f9;opacity:.55;font-size:11px;font-weight:700;letter-spacing:4px;
+  text-anchor:middle;pointer-events:none;
+}
+
+/* 戰術收藏浮動列 */
+.collect-bar{
+  position:absolute;bottom:14px;left:50%;transform:translateX(-50%);
+  background:rgba(15,23,42,.92);border:1px solid var(--accent);border-radius:14px;
+  padding:10px 14px;z-index:6;display:flex;flex-direction:column;gap:8px;
+  box-shadow:0 8px 30px rgba(0,0,0,.6), 0 0 20px rgba(250,204,21,.15);
+  animation:modalIn .35s cubic-bezier(.2,1.1,.3,1);white-space:nowrap;
+}
+.collect-bar .row{display:flex;gap:8px;align-items:center;justify-content:center}
+.tier-btn{
+  border:2px solid transparent;border-radius:10px;padding:7px 10px;font-size:.8rem;
+  font-weight:800;cursor:pointer;transition:transform .12s,filter .12s;color:#0f172a;
+}
+.tier-btn:hover{transform:translateY(-2px);filter:brightness(1.15)}
+.tier-green{background:#4ade80}.tier-yellow{background:#facc15}.tier-red{background:#f87171}
+
+/* 對手等級下拉選單與戰術庫徽章 */
+select#aiLevel{
+  background:var(--panel2);border:1px solid #475569;color:var(--accent);
+  border-radius:8px;padding:5px 8px;font-size:.85rem;font-weight:700;cursor:pointer;
+}
+#libInfo{
+  font-size:.75rem;color:#94a3b8;background:var(--panel2);border:1px solid #475569;
+  border-radius:8px;padding:5px 10px;
+}
+
+/* 雙打戰術大師指南對照表 */
+.guide-row{
+  border:1px solid #334155;border-left:4px solid var(--accent);border-radius:10px;
+  padding:8px 12px;margin-bottom:8px;font-size:.78rem;line-height:1.7;
+  background:rgba(255,255,255,.03);
+}
+.guide-row .g-situ{color:var(--accent);font-weight:800}
+.guide-row .g-opp{color:#fda4af}
+.guide-row .g-std{color:#4ade80}
+.guide-row .g-fix{color:#cbd5e1}
+.guide-row .g-perf{color:#94a3b8;font-size:.72rem;margin-top:2px}
+
+/* 幽靈區紅色光暈脈動 */
+@keyframes ghostPulse{
+  0%,100%{fill:rgba(239,68,68,.12);stroke-opacity:.25}
+  50%{fill:rgba(239,68,68,.42);stroke-opacity:.9}
+}
+.ghost-glow{
+  animation:ghostPulse 1.1s ease-in-out infinite;
+  stroke:var(--red);stroke-width:2.5;pointer-events:none;
+}
+
+/* 球員圓形標示物：平滑移動 */
+.player{transition:transform .65s cubic-bezier(.22,1.2,.36,1)}
+.player circle.body{stroke-width:3}
+.player text{
+  fill:#fff;font-weight:900;font-size:15px;text-anchor:middle;dominant-baseline:central;
+  pointer-events:none;
+}
+.player.clickable{cursor:pointer}
+@keyframes collideFlash{
+  0%,100%{stroke:#fff;stroke-width:3}
+  50%{stroke:var(--red);stroke-width:8}
+}
+.player.collide circle.body{animation:collideFlash .3s ease-in-out 5}
+@keyframes suggestRing{
+  0%,100%{stroke-opacity:.9;r:22}
+  50%{stroke-opacity:.2;r:26}
+}
+.suggest-ring{fill:none;stroke:var(--accent);stroke-width:2.5;stroke-dasharray:5 4;animation:suggestRing 1s infinite}
+
+/* 教練影子：標準站位的半透明綠色圓圈 */
+@keyframes coachPulse{0%,100%{opacity:.7}50%{opacity:.3}}
+.ghost-coach{
+  fill:rgba(74,222,128,.25);stroke:#4ade80;stroke-width:2.5;stroke-dasharray:6 5;
+  animation:coachPulse 1.3s ease-in-out infinite;pointer-events:none;
+}
+.ghost-coach-label{
+  fill:#4ade80;font-size:11px;font-weight:700;text-anchor:middle;
+  pointer-events:none;opacity:.8;
+}
+/* 佔位階段被選取的球員 */
+.player.movesel circle.body{
+  stroke:#4ade80;stroke-width:5;
+  filter:drop-shadow(0 0 8px #4ade80);
+}
+
+/* 羽球與軌跡 */
+#shuttle{transition:transform .55s cubic-bezier(.3,.8,.5,1)}
+@keyframes trajFade{0%{opacity:.95}70%{opacity:.55}100%{opacity:0}}
+.traj{animation:trajFade 1.5s forwards;pointer-events:none}
+
+/* 飛行殘影粒子 */
+@keyframes trailFade{from{opacity:.85}to{opacity:0;transform:scale(.2)}}
+.trail-dot{animation:trailFade .55s forwards;pointer-events:none;transform-box:fill-box;transform-origin:center}
+
+/* 落點衝擊波 */
+@keyframes ringOut{from{transform:scale(.25);opacity:.95}to{transform:scale(3.2);opacity:0}}
+.impact{
+  transform-box:fill-box;transform-origin:center;fill:none;stroke-width:3;
+  animation:ringOut .65s ease-out forwards;pointer-events:none;
+}
+
+/* 殺球震場 */
+@keyframes courtShake{
+  0%,100%{transform:none}20%{transform:translate(4px,-3px)}
+  40%{transform:translate(-4px,3px)}60%{transform:translate(3px,2px)}
+  80%{transform:translate(-2px,-2px)}
+}
+.court-shake{animation:courtShake .32s linear}
+
+/* 擊球瞬間的球種標籤（臨場感彈出膠囊） */
+@keyframes bannerPop{
+  0%{transform:translate(-50%,-50%) scale(.3);opacity:0}
+  18%{transform:translate(-50%,-50%) scale(1.18);opacity:1}
+  38%{transform:translate(-50%,-50%) scale(1);opacity:1}
+  75%{transform:translate(-50%,-90%) scale(1);opacity:.95}
+  100%{transform:translate(-50%,-140%) scale(.95);opacity:0}
+}
+.shot-banner{
+  position:absolute;transform:translate(-50%,-50%);padding:4px 13px;border-radius:99px;
+  font-weight:900;font-size:.95rem;letter-spacing:.06em;pointer-events:none;z-index:4;
+  border:2px solid;background:rgba(15,23,42,.88);white-space:nowrap;
+  animation:bannerPop 1.25s ease-out forwards;
+  box-shadow:0 4px 16px rgba(0,0,0,.5), 0 0 14px currentColor;
+  text-shadow:0 0 8px currentColor;
+}
+
+/* POINT! 特效 */
+#fxOverlay{
+  position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  pointer-events:none;z-index:5;
+}
+@keyframes pointPop{
+  0%{transform:scale(.2) rotate(-8deg);opacity:0}
+  35%{transform:scale(1.25) rotate(2deg);opacity:1}
+  70%{transform:scale(1) rotate(0);opacity:1}
+  100%{transform:scale(1.05);opacity:0}
+}
+.fx-text{
+  font-size:3.2rem;font-weight:900;letter-spacing:.1em;
+  animation:pointPop 1.4s ease-out forwards;
+  text-shadow:0 0 30px currentColor;
+}
+.fx-win{color:#4ade80}.fx-lose{color:#f87171}.fx-warn{color:var(--accent);font-size:2.1rem}
+
+/* ═══════════════ 控制面板 ═══════════════ */
+.scoreline{display:flex;justify-content:space-between;align-items:center}
+.score-big{font-size:2rem;font-weight:900;color:var(--accent);letter-spacing:.05em}
+.score-meta{font-size:.75rem;color:#94a3b8;text-align:right;line-height:1.5}
+.matchpoint{color:var(--red);font-weight:900;animation:ghostTextBlink 1s infinite}
+@keyframes ghostTextBlink{50%{opacity:.35}}
+
+.step-hint{font-size:.75rem;color:#94a3b8;margin-bottom:6px}
+.step-hint b{color:var(--accent)}
+.btn-row{display:flex;gap:8px;flex-wrap:wrap}
+.pick{
+  flex:1;min-width:56px;background:var(--panel2);color:#e2e8f0;border:2px solid #475569;
+  border-radius:10px;padding:9px 4px;font-size:.82rem;font-weight:700;cursor:pointer;
+  transition:all .15s;text-align:center;
+}
+.pick:hover:not(:disabled){border-color:var(--accent);transform:translateY(-2px)}
+.pick.sel{background:var(--accent);color:#1c1917;border-color:var(--accent);box-shadow:0 0 14px rgba(250,204,21,.45)}
+.pick:disabled{opacity:.35;cursor:not-allowed;transform:none}
+.pick.hitterA.sel{background:var(--blue);border-color:var(--blue);box-shadow:0 0 14px rgba(56,189,248,.5)}
+.pick.hitterB.sel{background:var(--orange);border-color:var(--orange);box-shadow:0 0 14px rgba(251,146,60,.5)}
+.pick .star{color:var(--accent)}
+
+/* 被動值 */
+.gauge-track{height:14px;border-radius:99px;background:#0f172a;overflow:hidden;border:1px solid #475569}
+.gauge-fill{
+  height:100%;width:0%;border-radius:99px;transition:width .5s,background .5s;
+  background:linear-gradient(90deg,#4ade80,#facc15,#ef4444);
+}
+.gauge-num{font-size:.72rem;color:#94a3b8;margin-top:4px;text-align:right}
+
+/* 戰況播報 */
+#feed{height:190px;overflow-y:auto;font-size:.78rem;line-height:1.55;display:flex;flex-direction:column;gap:3px}
+#feed::-webkit-scrollbar{width:6px}
+#feed::-webkit-scrollbar-thumb{background:#475569;border-radius:3px}
+.f-sys{color:#64748b}.f-us{color:#7dd3fc}.f-opp{color:#fda4af}
+.f-win{color:#4ade80;font-weight:700}.f-lose{color:#f87171;font-weight:700}
+.f-err{color:var(--red);font-weight:700}.f-ghost{color:var(--accent);font-weight:700}
+
+/* 劇本匯入/匯出 */
+textarea#scriptBox{
+  width:100%;height:110px;background:#0f172a;color:#a5f3fc;border:1px solid #475569;
+  border-radius:10px;padding:8px;font-family:monospace;font-size:.75rem;resize:vertical;
+}
+
+/* ═══════════════ 教練講評 Modal ═══════════════ */
+#modalBack{
+  position:fixed;inset:0;background:rgba(2,6,23,.8);backdrop-filter:blur(4px);
+  display:none;align-items:center;justify-content:center;z-index:50;padding:16px;
+}
+#modalBack.show{display:flex}
+.modal{
+  background:linear-gradient(160deg,#1e293b,#0f172a);border:1px solid #475569;
+  border-radius:18px;max-width:640px;width:100%;max-height:86vh;overflow-y:auto;
+  padding:24px 26px;box-shadow:0 24px 80px rgba(0,0,0,.7);
+  animation:modalIn .45s cubic-bezier(.2,1.1,.3,1);
+}
+@keyframes modalIn{from{transform:translateY(50px) scale(.92);opacity:0}to{transform:none;opacity:1}}
+.modal h2{color:var(--accent);letter-spacing:.15em;font-size:1.2rem;text-align:center;margin-bottom:4px}
+.modal .verdict{text-align:center;font-size:.95rem;margin:10px 0 16px}
+.stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px;margin-bottom:16px}
+.stat{background:var(--panel2);border-radius:12px;padding:10px;text-align:center}
+.stat .num{font-size:1.5rem;font-weight:900;color:var(--accent)}
+.stat .lbl{font-size:.68rem;color:#94a3b8;margin-top:2px}
+.moments{display:flex;flex-direction:column;gap:8px;margin-bottom:16px}
+.moment{border-left:4px solid;border-radius:8px;background:rgba(255,255,255,.04);padding:8px 12px;font-size:.8rem;line-height:1.6}
+.m-err{border-color:var(--red)}.m-miss{border-color:var(--orange)}.m-good{border-color:#4ade80}
+.grade-box{text-align:center;background:var(--panel2);border-radius:12px;padding:12px;margin-bottom:16px}
+.grade{font-size:2.6rem;font-weight:900;color:var(--accent);text-shadow:0 0 24px rgba(250,204,21,.5)}
+.grade-word{font-size:.85rem;color:#cbd5e1;margin-top:4px;line-height:1.6}
+.modal-btns{display:flex;gap:10px;justify-content:center}
+@media(max-width:780px){.panel-col{width:100%;max-width:420px}}
+</style>
+</head>
+<body>
+
+<h1>🏸 羽球雙打輪轉戰術模擬器</h1>
+<div class="subtitle">DOUBLES ROTATION TACTICAL SIMULATOR — 你是 <b style="color:var(--blue)">A</b>（主決策）、隊友 <b style="color:var(--orange)">B</b> 由 AI 自動補位</div>
+
+<!-- ═══ 頂部：賽制設定 ═══ -->
+<div class="settings">
+  <label>幾分制 <input type="number" id="setTarget" value="11" min="1" max="99"></label>
+  <label>我方起始 <input type="number" id="setMy" value="0" min="0" max="98"></label>
+  <label>對方起始 <input type="number" id="setOpp" value="0" min="0" max="98"></label>
+  <button class="btn btn-start" id="btnStart">▶ 隨機實戰模式</button>
+  <button class="btn btn-gold" id="btnClassic">🥇 奧運金牌挑戰賽</button>
+  <label class="toggle">
+    <input type="checkbox" id="ghostToggle" checked>
+    <span class="track"><span class="knob"></span></span>
+    顯示防守漏洞 🔴
+  </label>
+  <label class="toggle">
+    <input type="checkbox" id="coachToggle" checked>
+    <span class="track"><span class="knob"></span></span>
+    教練站位提示 🟢
+  </label>
+  <label class="toggle">
+    <input type="checkbox" id="manualToggle">
+    <span class="track"><span class="knob"></span></span>
+    ⏸ 手動走位（時間靜止）
+  </label>
+  <label>對手等級
+    <select id="aiLevel">
+      <option value="basic">🟢 初級</option>
+      <option value="mid">🟡 中級</option>
+      <option value="high">🔴 高級</option>
+    </select>
+  </label>
+  <span id="libInfo">戰術庫 —</span>
+  <button class="btn btn-ghost-sm" id="btnClearLib" title="清空 AI 戰術庫">🗑</button>
+</div>
+
+<div class="wrap">
+  <!-- ═══ 3D 立體視角（左） ═══ -->
+  <div class="scene3d-col">
+    <div class="scene-caption">◆ 3D 立體視角 LIVE</div>
+    <div class="scene3d" id="scene3d">
+      <div class="world" id="world3d"></div>
+      <!-- 一分球 3D 逐拍回放面板 -->
+      <div id="replayPanel">
+        <div class="rp-row">
+          <span class="rp-title">🎬 一分球回放</span>
+          <button class="rp-btn" id="rpPause">⏸ 暫停</button>
+          <button class="rp-btn" id="rpStop">⏹ 結束</button>
+          <div id="rpProg"><div id="rpFill"></div></div>
+        </div>
+        <div id="replaySub"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ 2D 戰術操控板（中） ═══ -->
+  <div class="court-col">
+    <div class="scene-caption" style="margin-bottom:6px">◆ 2D 戰術操控板（點擊操作）</div>
+    <svg id="court" width="380" height="720" viewBox="0 0 380 720"></svg>
+    <div id="fxOverlay"></div>
+    <!-- 勝利回合後的戰術收藏列 -->
+    <div id="collectBar" class="collect-bar" style="display:none">
+      <div class="row" id="collectStep1">
+        <button class="btn btn-ghost-sm" id="btnReplay">🎬 回放此分</button>
+        <button class="btn btn-gold" id="btnCollect">🌟 收藏至 AI 戰術庫</button>
+        <button class="btn btn-ghost-sm" id="btnSkipCollect">➡ 繼續</button>
+      </div>
+      <div class="row" id="collectStep2" style="display:none">
+        <span style="font-size:.8rem;color:#cbd5e1">歸類等級：</span>
+        <button class="tier-btn tier-green" data-tier="green">🟢 初級戰術</button>
+        <button class="tier-btn tier-yellow" data-tier="yellow">🟡 中級戰術</button>
+        <button class="tier-btn tier-red" data-tier="red">🔴 高級戰術</button>
+      </div>
+    </div>
+    <!-- 隨身環形擊球盤（Pie Menu） -->
+    <div id="pieMenu" style="display:none"></div>
+  </div>
+
+  <!-- ═══ 右側控制面板 ═══ -->
+  <div class="panel-col">
+    <div class="card">
+      <div class="scoreline">
+        <div class="score-big"><span id="scoreMy">0</span> : <span id="scoreOpp">0</span></div>
+        <div class="score-meta">
+          我方 vs 對方<br>
+          <span id="rallyInfo">尚未開賽</span><br>
+          <span id="mpFlag"></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" id="controlCard">
+      <h3>◆ 戰術決策</h3>
+      <div class="step-hint" id="stepHint">先開賽，對方來球時進入「佔位 → 擊球」兩階段決策</div>
+      <button class="btn btn-start" id="btnConfirmPos" style="width:100%;margin-bottom:8px;display:none">✅ 確認站位</button>
+      <div id="posTimerWrap" style="display:none;margin-bottom:8px">
+        <div class="gauge-track"><div id="posTimerFill"></div></div>
+        <div class="gauge-num" id="posTimerNum">⏱ 走位倒數 – s</div>
+      </div>
+      <div style="font-size:.75rem;color:#94a3b8;line-height:1.7">
+        🤖 隊友 <b style="color:var(--orange)">B</b> 全智能自動補位，你只需操控 <b style="color:var(--blue)">A</b>。<br>
+        擊球者由站位自動判定；出拍時，擊球者頭上會彈出
+        <b style="color:var(--accent)">環形擊球盤</b>（8 種實戰球路）。
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>◆ 📢 即時戰術語音板</h3>
+      <div id="voiceBoard" style="font-size:.82rem;line-height:1.75;min-height:56px;color:#e2e8f0">
+        開賽後，這裡會即時解說當前情境的標準站位與就位狀態。
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>◆ 對方被動值 PRESSURE</h3>
+      <div class="gauge-track"><div class="gauge-fill" id="gauge"></div></div>
+      <div class="gauge-num" id="gaugeNum">0 / 100</div>
+    </div>
+
+    <div class="card">
+      <h3>◆ 戰況播報</h3>
+      <div id="feed"><div class="f-sys">教練已就位。設定賽制後點擊上方按鈕開賽。</div></div>
+    </div>
+
+    <div class="card">
+      <h3>◆ 戰術劇本 匯入 / 匯出</h3>
+      <textarea id="scriptBox" placeholder="格式範例：&#10;Shot 1: OPP Serve -> L2&#10;Shot 2: US(B) Push -> R3&#10;Shot 3: OPP Drive -> R1"></textarea>
+      <div class="btn-row" style="margin-top:8px">
+        <button class="btn btn-ghost-sm" id="btnExport" style="flex:1">📤 匯出本場精采來回</button>
+        <button class="btn btn-ghost-sm" id="btnImport" style="flex:1">📥 載入劇本開賽</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ 教練講評 Modal ═══ -->
+<div id="modalBack">
+  <div class="modal">
+    <h2>🏸 賽 後 診 斷 講 評 報 告</h2>
+    <div class="verdict" id="mVerdict"></div>
+    <div class="stat-grid">
+      <div class="stat"><div class="num" id="mShots">0</div><div class="lbl">總來回拍數</div></div>
+      <div class="stat"><div class="num" id="mPos">—</div><div class="lbl">站位正確率</div></div>
+      <div class="stat"><div class="num" id="mRot">0%</div><div class="lbl">教科書站位率</div></div>
+      <div class="stat"><div class="num" id="mGhost">—</div><div class="lbl">空檔漏洞把握率</div></div>
+    </div>
+    <h3 style="color:#7dd3fc;font-size:.8rem;letter-spacing:.12em;margin-bottom:8px">◆ 關鍵回合精準檢討（幽靈區 × 走位分析）</h3>
+    <div class="moments" id="mMoments"></div>
+    <h3 style="color:#7dd3fc;font-size:.8rem;letter-spacing:.12em;margin-bottom:8px">◆ 📘 雙打戰術大師指南（站位對照表）</h3>
+    <div id="mGuide" style="margin-bottom:16px"></div>
+    <div class="grade-box">
+      <div class="grade" id="mGrade">A</div>
+      <div class="grade-word" id="mGradeWord"></div>
+    </div>
+    <div class="modal-btns">
+      <button class="btn btn-start" id="btnRematch">🔄 再戰一場</button>
+      <button class="btn btn-ghost-sm" id="btnCloseModal">關閉報告</button>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+/* ════════════════════════════════════════════════════════════════
+   羽球雙打輪轉戰術模擬器 — 核心引擎
+   架構：Court(SVG渲染) / RotationSM(狀態機) / OppAI(球路因果)
+        / MatchEngine(async 主迴圈) / Review(講評) / ScriptIO(劇本)
+   ════════════════════════════════════════════════════════════════ */
+const $ = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const rand = () => Math.random();
+const pick = arr => arr[Math.floor(rand() * arr.length)];
+
+/* ── 球場幾何：雙層座標系 ─────────────────────────────────────
+   宏區（8 大區 L1~R4）：負責球路因果、幽靈區、戰術庫、劇本相容
+   微格（4×4×雙方 = 32 格）：負責細膩站位與落點
+   微格代碼：M{欄}{排}=我方、O{欄}{排}=對方
+   欄 1~4 = 左大角/左中/右中/右大角；排 1~4 = 網前/中前/中後/底線深區 */
+const ZONES = {};
+const MACRO_KIDS = {};
+const ZNAME = {
+  L1:'我方左後防守區 L1', R1:'我方右後防守區 R1',
+  L2:'我方左前網前區 L2', R2:'我方右前網前區 R2',
+  L3:'對方左中平推區 L3', R3:'對方右中平推區 R3',
+  L4:'對方左後深區 L4',   R4:'對方右後深區 R4',
+};
+{
+  const MACROS = {
+    L4:{x:40, y:30,  w:150,h:160,cx:115,cy:110,side:'opp'},
+    R4:{x:190,y:30,  w:150,h:160,cx:265,cy:110,side:'opp'},
+    L3:{x:40, y:190, w:150,h:160,cx:115,cy:270,side:'opp'},
+    R3:{x:190,y:190, w:150,h:160,cx:265,cy:270,side:'opp'},
+    L2:{x:40, y:350, w:150,h:160,cx:115,cy:430,side:'us'},
+    R2:{x:190,y:350, w:150,h:160,cx:265,cy:430,side:'us'},
+    L1:{x:40, y:510, w:150,h:160,cx:115,cy:590,side:'us'},
+    R1:{x:190,y:510, w:150,h:160,cx:265,cy:590,side:'us'},
+  };
+  for (const m in MACROS){
+    ZONES[m] = {...MACROS[m], type:'macro', macro:m};
+    MACRO_KIDS[m] = [];
+  }
+  const COLN = ['左大角','左中','右中','右大角'];
+  const ROWN = ['網前','中前','中後','底線深區'];
+  for (let col=1; col<=4; col++){
+    const x = 40 + (col-1)*75;
+    for (let row=1; row<=4; row++){
+      /* 我方微格：排 1 貼網（y350 起往下） */
+      const yu = 350 + (row-1)*80;
+      const mc = 'M'+col+row;
+      const mMac = col<=2 ? (row<=2?'L2':'L1') : (row<=2?'R2':'R1');
+      ZONES[mc] = {x, y:yu, w:75, h:80, cx:x+37.5, cy:yu+40,
+                   side:'us', type:'micro', col, row, macro:mMac};
+      MACRO_KIDS[mMac].push(mc);
+      ZNAME[mc] = `我方${COLN[col-1]}·${ROWN[row-1]}`;
+      /* 對方微格：排 1 貼網（y350 起往上） */
+      const yo = 350 - row*80;
+      const oc = 'O'+col+row;
+      const oMac = col<=2 ? (row<=2?'L3':'L4') : (row<=2?'R3':'R4');
+      ZONES[oc] = {x, y:yo, w:75, h:80, cx:x+37.5, cy:yo+40,
+                   side:'opp', type:'micro', col, row, macro:oMac};
+      MACRO_KIDS[oMac].push(oc);
+      ZNAME[oc] = `對方${COLN[col-1]}·${ROWN[row-1]}`;
+    }
+  }
+}
+const macroOf = c => ZONES[c].macro;
+/* 在宏區內隨機挑一個微格落點（可指定偏好排：如發短球落網前） */
+function microIn(m, rowPref){
+  let kids = MACRO_KIDS[m] || [m];
+  if (rowPref){
+    const f = kids.filter(k=>ZONES[k].row===rowPref);
+    if (f.length) kids = f;
+  }
+  return pick(kids);
+}
+const MY_FRONT = ['L2','R2'], MY_BACK = ['L1','R1'];
+const OPP_ZONES = ['L3','R3','L4','R4'];
+
+/* ── 球種資料 ───────────────────────────────────────────────── */
+const SHOTS = {
+  S:{name:'殺球 Smash',      icon:'💥', fast:true },
+  D:{name:'切球 Drop',       icon:'💧', fast:false},
+  C:{name:'高遠球 Clear',    icon:'🏸', fast:false},
+  L:{name:'挑球 Lift',       icon:'⬆️', fast:false},
+  P:{name:'推撲球 Push',     icon:'⚡', fast:true },
+  V:{name:'平抽對撕 Drive',  icon:'↔️', fast:true },
+  N:{name:'網前搓球 NetDrop',icon:'🕸️', fast:false},
+  B:{name:'追身球 BodyShot', icon:'🎯', fast:true },
+};
+const ATTACK_CODES = 'SDPVNB';   /* 這些球種後我方屬進攻節奏 */
+
+/* ══ 羽球物理鐵律 ①：球種 → 合法落點排（對方場，排1=網前…排4=底線深區）══ */
+const TARGET_ROWS = {
+  S:[1,2,3],  D:[1,2,3],   /* 下墜球組：禁點底線深區（會出界） */
+  C:[3,4],    L:[3,4],     /* 後場球組：只能落中後與深區 */
+  V:[2,3],    B:[2,3],     /* 平推球組：鎖定中場走廊 */
+  N:[1],                    /* 搓小球：絕對只能貼網 */
+  P:[1,2,3],                /* 推撲：壓前三排 */
+};
+/* ══ 羽球物理鐵律 ②：我方擊球區 × 手位（高手位=人已到球點）→ 可用球種 ══ */
+function allowedShots(cell, hand){
+  const row = ZONES[cell].row;
+  if (row===1)  /* 網前：高手位解鎖撲球；低手位只能搓回或挑高 */
+    return hand==='high' ? ['P','N','V','L'] : ['N','L'];
+  if (row===4)  /* 底線深區：低手位被迫過渡，殺球鎖定 */
+    return hand==='high' ? ['S','D','C','L'] : ['C','L'];
+  /* 中前/中後 */
+  return hand==='high' ? ['S','D','C','L','P','V','B'] : ['D','C','L','V'];
+}
+const OPP_SHOTS = {
+  SERVE:{name:'發短球',       icon:'🏸', land:['L2','R2'], fast:false},
+  SMASH:{name:'強烈殺球',     icon:'💥', land:['L1','R1'], fast:true },
+  DROP :{name:'切球',         icon:'💧', land:['L2','R2'], fast:false},
+  NET  :{name:'網前搓球回放', icon:'🕸️', land:['L2','R2'], fast:false},
+  BLOCK:{name:'網前勉強擋球', icon:'🛡️', land:['L2','R2'], fast:false},
+  LIFT :{name:'被動挑高球',   icon:'⬆️', land:['L1','R1'], fast:false},
+  FLAT :{name:'平高長球',     icon:'🌪️', land:['L1','R1'], fast:false},
+  DRIVE:{name:'平抽快球',     icon:'➡️', land:['L1','R1'], fast:true },
+};
+/* 嚴謹球路因果表：我方球種 → 對方回球機率 */
+const REPLY = {
+  S:[['LIFT',.70],['BLOCK',.30]],
+  D:[['LIFT',.40],['NET',.60]],
+  C:[['SMASH',.50],['DROP',.30],['FLAT',.20]],
+  L:[['SMASH',.50],['DROP',.30],['FLAT',.20]],
+  P:[['LIFT',.50],['BLOCK',.30],['DRIVE',.20]],
+  V:[['DRIVE',.45],['BLOCK',.25],['LIFT',.30]],   /* 平抽 → 高速對撕拉鋸 */
+  N:[['NET',.50],['LIFT',.40],['DRIVE',.10]],     /* 搓球 → 鬥小球或被迫挑高 */
+  B:[['BLOCK',.45],['LIFT',.40],['DRIVE',.15]],   /* 追身 → 對方讓位勉強招架 */
+};
+const PRESSURE_DELTA = {S:40, D:20, P:15, V:15, N:10, B:25, C:'RESET', L:'RESET'};
+const WINNER_BASE = {S:.20, D:.12, P:.12, V:.10, N:.08, B:.15, C:.03, L:.02};
+const UNFORCED   = {S:.08, D:.05, P:.06, V:.06, N:.05, B:.07, C:.03, L:.03};
+const GHOST_RATE = .85, ROT_PUNISH = .65;
+
+const wchoice = t => { let r = rand(), a = 0; for (const [k,p] of t){a+=p; if(r<=a) return k;} return t[t.length-1][0]; };
+
+/* ════════════════ SVG 球場渲染 ════════════════ */
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const svg = $('#court');
+function el(tag, attrs, parent){
+  const e = document.createElementNS(SVG_NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  (parent || svg).appendChild(e);
+  return e;
+}
+function buildCourt(){
+  /* 場地底色（Tiffany 綠）與光澤 */
+  el('rect',{x:40,y:30,width:300,height:640,rx:4,fill:'var(--court)'});
+  el('rect',{x:40,y:30,width:300,height:640,rx:4,fill:'url(#sheen)','pointer-events':'none'});
+  const defs = el('defs',{});
+  const grad = el('linearGradient',{id:'sheen',x1:0,y1:0,x2:0,y2:1},defs);
+  el('stop',{offset:'0%','stop-color':'rgba(255,255,255,.10)'},grad);
+  el('stop',{offset:'50%','stop-color':'rgba(255,255,255,0)'},grad);
+  el('stop',{offset:'100%','stop-color':'rgba(0,0,0,.18)'},grad);
+
+  /* 白色場地線（外框、中線、發球線、雙打後發球線） */
+  const L = (x1,y1,x2,y2,w=2.5)=>el('line',{x1,y1,x2,y2,stroke:'var(--line)','stroke-width':w,'pointer-events':'none'});
+  el('rect',{x:40,y:30,width:300,height:640,fill:'none',stroke:'var(--line)','stroke-width':4,'pointer-events':'none'});
+  L(58,30,58,670,1.8); L(322,30,322,670,1.8);          /* 單打邊線 */
+  L(40,80,340,80,1.8); L(40,620,340,620,1.8);          /* 雙打後發球線 */
+  L(40,270,340,270,1.8); L(40,430,340,430,1.8);        /* 前發球線 */
+  L(190,30,190,270,1.8); L(190,430,190,670,1.8);       /* 中線 */
+
+  /* 微格戰術網格線（淡色虛線，區別於正式球場白線） */
+  for (let i=1; i<4; i++){
+    const gx = 40 + i*75;
+    el('line',{x1:gx,y1:30,x2:gx,y2:670,stroke:'rgba(248,250,252,.14)',
+      'stroke-width':1,'stroke-dasharray':'3 4','pointer-events':'none'});
+  }
+  for (const gy of [110,190,270,430,510,590]){
+    el('line',{x1:40,y1:gy,x2:340,y2:gy,stroke:'rgba(248,250,252,.14)',
+      'stroke-width':1,'stroke-dasharray':'3 4','pointer-events':'none'});
+  }
+  /* 32 個微格互動區 */
+  for (const z in ZONES){
+    if (ZONES[z].type !== 'micro') continue;
+    const c = ZONES[z];
+    const r = el('rect',{x:c.x,y:c.y,width:c.w,height:c.h,class:'zone','data-zone':z});
+    r.addEventListener('click',()=>onZoneClick(z));
+  }
+  /* 宏區座標浮水印（L1~R4 保留，供快速定向） */
+  for (const z in ZONES){
+    if (ZONES[z].type !== 'macro') continue;
+    const c = ZONES[z];
+    el('text',{x:c.cx,y:c.cy,class:'zone-label'}).textContent = z;
+  }
+  /* 左右邊線外的 4×4 排區功能標示（直式） */
+  const ROW_TAGS = [[70,'底線深區'],[150,'中後'],[230,'中前'],[310,'網前'],
+                    [390,'網前'],[470,'中前'],[550,'中後'],[630,'底線深區']];
+  for (const [ry,tag] of ROW_TAGS){
+    el('text',{x:20,y:ry,class:'row-label',transform:`rotate(-90 20 ${ry})`}).textContent = tag;
+    el('text',{x:360,y:ry,class:'row-label',transform:`rotate(90 360 ${ry})`}).textContent = tag;
+  }
+  /* 幽靈區光暈層（動態顯示） */
+  window.ghostLayer = el('g',{id:'ghostLayer'});
+
+  /* 網子 */
+  el('rect',{x:32,y:344,width:316,height:12,fill:'#1e293b',rx:3,'pointer-events':'none'});
+  for(let x=36;x<348;x+=10) el('line',{x1:x,y1:344,x2:x,y2:356,stroke:'#94a3b8','stroke-width':1,'pointer-events':'none'});
+  el('line',{x1:32,y1:344,x2:348,y2:344,stroke:'#f8fafc','stroke-width':3,'pointer-events':'none'});
+  el('circle',{cx:32,cy:350,r:5,fill:'#cbd5e1'}); el('circle',{cx:348,cy:350,r:5,fill:'#cbd5e1'});
+  el('text',{x:190,y:353,'text-anchor':'middle','font-size':9,fill:'#64748b','font-family':'monospace','pointer-events':'none'}).textContent='NET';
+
+  /* 軌跡層（在球員之下、球之上會重繪順序處理） */
+  window.trajLayer = el('g',{id:'trajLayer'});
+  /* 教練影子層：標準站位的綠色圓圈 */
+  window.coachLayer = el('g',{id:'coachLayer'});
+
+  /* 球員圓形標示物 */
+  window.pEls = {};
+  const mk = (id, color, label, clickable) => {
+    const g = el('g',{class:'player'+(clickable?' clickable':''),id:'p'+id});
+    el('circle',{class:'body',r:16,fill:color,stroke:'#fff'},g);
+    const t = el('text',{},g); t.textContent = label;
+    if (clickable) g.addEventListener('click',()=>onPlayerClick(id));
+    pEls[id] = g;
+    return g;
+  };
+  mk('A','var(--blue)','A',true);
+  mk('B','var(--orange)','B',true);
+  mk('X','#9ca3af','X',false);
+  mk('Y','#9ca3af','Y',false);
+  /* 建議擊球者光環 */
+  window.suggestRing = el('circle',{class:'suggest-ring',r:22,style:'display:none'});
+
+  /* 羽球 */
+  const sh = el('g',{id:'shuttle'});
+  el('circle',{r:8,fill:'var(--accent)',stroke:'#fff','stroke-width':2},sh);
+  el('circle',{r:3.5,fill:'#fff',cx:-2,cy:-2,opacity:.7},sh);
+  window.shuttleEl = sh;
+}
+function movePiece(g, x, y, instant){
+  if (instant){ g.style.transition='none'; }
+  g.style.transform = `translate(${x}px,${y}px)`;
+  if (instant){ g.getBoundingClientRect(); g.style.transition=''; }
+  sync3D(g, x, y, instant);   /* 2D 任何移動 → 3D 同步 */
+}
+
+/* ════════════════ 3D 立體視角引擎（CSS 3D 透視投影） ════════════════
+   與 2D 戰術板共用同一套 380×720 座標系：
+   - 場地平面躺在 world（rotateX 傾斜）上
+   - 網子 / 球員立牌以 rotateX(-90°) 直立於平面
+   - 羽球以 translateZ(h) 表現飛行高度 → 高遠球高拋、殺球急墜  */
+function build3D(){
+  const world = $('#world3d');
+  /* 場地平面（同步 2D 標線） */
+  const c3 = document.createElementNS(SVG_NS,'svg');
+  c3.setAttribute('width','380'); c3.setAttribute('height','720');
+  c3.setAttribute('viewBox','0 0 380 720');
+  world.appendChild(c3);
+  el('rect',{x:40,y:30,width:300,height:640,rx:4,fill:'#0e8b7d'},c3);
+  el('rect',{x:40,y:30,width:300,height:640,fill:'none',stroke:'#f8fafc','stroke-width':4},c3);
+  const L3=(x1,y1,x2,y2)=>el('line',{x1,y1,x2,y2,stroke:'#f8fafc','stroke-width':1.8},c3);
+  L3(58,30,58,670); L3(322,30,322,670);
+  L3(40,80,340,80); L3(40,620,340,620);
+  L3(40,270,340,270); L3(40,430,340,430);
+  L3(190,30,190,270); L3(190,430,190,670);
+  /* 3D 版微格戰術網格線 */
+  for (let i=1;i<4;i++){
+    el('line',{x1:40+i*75,y1:30,x2:40+i*75,y2:670,stroke:'rgba(248,250,252,.12)',
+      'stroke-width':1,'stroke-dasharray':'3 4'},c3);
+  }
+  for (const gy of [110,190,270,430,510,590]){
+    el('line',{x1:40,y1:gy,x2:340,y2:gy,stroke:'rgba(248,250,252,.12)',
+      'stroke-width':1,'stroke-dasharray':'3 4'},c3);
+  }
+  for (const z in ZONES){
+    if (ZONES[z].type !== 'macro') continue;
+    const c = ZONES[z];
+    el('text',{x:c.cx,y:c.cy,'text-anchor':'middle','dominant-baseline':'central',
+      fill:'rgba(248,250,252,.14)','font-size':30,'font-weight':900,
+      'font-family':'monospace'},c3).textContent = z;
+  }
+  /* 直立網子 */
+  const net = document.createElement('div');
+  net.className = 'net3d';
+  world.appendChild(net);
+  /* 球員立牌 + 球 + 影子 */
+  window.p3d = {}; window.el2d3d = new Map();
+  window.p3dState = {};      /* 每位球員的站點與朝向 */
+  window.lastBall = {x:190, y:350};
+  const mk3 = (id, color)=>{
+    const d = document.createElement('div');
+    d.className = 'p3d';
+    d.dataset.pid = id;
+    d.innerHTML =
+      `<span class="dir"></span>` +
+      `<span class="fig" style="--jersey:${color}">` +
+        `<i class="side"></i>` +
+        `<i class="face front"><b>${id}</b></i>` +
+        `<i class="face back"></i>` +
+        `<i class="headF"></i><i class="headB"></i>` +
+        `<i class="racket"></i>` +
+      `</span>`;
+    world.appendChild(d);
+    p3d[id] = d;
+    p3dState[id] = {x:190, y:500};
+    el2d3d.set(pEls[id], d);
+  };
+  mk3('A','#38bdf8'); mk3('B','#fb923c');
+  mk3('X','#94a3b8'); mk3('Y','#94a3b8');
+  window.shadow3d = document.createElement('div');
+  shadow3d.className = 'shadow3d'; world.appendChild(shadow3d);
+  window.ball3dEl = document.createElement('div');
+  ball3dEl.className = 'ball3d'; world.appendChild(ball3dEl);
+  el2d3d.set(shuttleEl, 'BALL');
+  rot.render(true); opp.render(true); ball3D(190,350,0);
+}
+/* 朝向引擎：小人正面永遠轉向羽球（含頭部/雙眼/球拍的立體朝向） */
+function applyPlayerTransform(id, instant){
+  const d = p3d[id], st = p3dState[id];
+  if (!d || !st) return;
+  const dx = lastBall.x - st.x, dy = lastBall.y - st.y;
+  const deg = (Math.abs(dx)+Math.abs(dy) < 4) ? (st.deg||0)
+            : Math.atan2(-dx, dy) * 180/Math.PI;   /* 正面(+Y)轉向球 */
+  st.deg = deg;
+  if (instant) d.style.transition='none';
+  d.style.transform = `translate3d(${st.x}px,${st.y}px,0) rotateZ(${deg}deg)`;
+  if (instant){ d.getBoundingClientRect(); d.style.transition=''; }
+}
+function set3DPlayer(d, x, y, instant){
+  const id = d.dataset.pid;
+  if (!id) return;
+  p3dState[id] = {...p3dState[id], x, y};
+  applyPlayerTransform(id, instant);
+}
+function setCrouch(on){
+  ['A','B'].forEach(id=>p3d[id] && p3d[id].classList.toggle('crouch', on));
+}
+function ball3D(x, y, h){
+  if (!window.ball3dEl) return;
+  lastBall.x = x; lastBall.y = y;
+  ball3dEl.style.transform = `translate3d(${x-9}px,${y-9}px,${h+9}px) rotateX(-90deg)`;
+  const k = Math.max(0, 1 - h/420);
+  shadow3d.style.transform = `translate3d(${x-11}px,${y-6}px,.5px) scale(${.55+.45*k})`;
+  shadow3d.style.opacity = (.45*k).toFixed(2);
+  /* 全場小人即時轉身追球（CSS transition 平滑化） */
+  for (const id of ['A','B','X','Y']) applyPlayerTransform(id);
+}
+function sync3D(g, x, y, instant){
+  if (!window.el2d3d) return;
+  const d = el2d3d.get(g);
+  if (!d) return;
+  if (d === 'BALL') ball3D(x, y, 0);
+  else set3DPlayer(d, x, y, instant);
+}
+/* 各球種的 3D 飛行高度模型（滯空時間差來自各球種的 dur） */
+const H3D = {S:0, D:130, C:310, L:310, P:60, V:42, N:48, B:0};
+function flightHeight(fxKey, t){
+  if (fxKey==='S') return 55*Math.pow(1-t, 1.25);     /* 殺球：起手高、直線急墜 */
+  if (fxKey==='B') return 42*Math.pow(1-t, 1.1);      /* 追身：平射壓向對方身體 */
+  if (fxKey==='N') return 48*4*t*(1-t)*(t<.5?1:.55)+2; /* 搓球：貼網翻滾式小弧 */
+  return (H3D[fxKey]||80)*4*t*(1-t) + 3;              /* 其餘：拋物線（高遠最高最慢）*/
+}
+function placePlayer(id, zone, instant=false, offset=0){
+  const c = ZONES[zone];
+  movePiece(pEls[id], c.cx+offset, c.cy+16, instant);
+}
+/* ── 球種視覺語言：每種球有專屬顏色 / 軌跡 / 速度 / 高度感 / 特效 ──
+   height：俯視視角的飛行高度（球在空中放大倍率）
+   trail ：殘影粒子密度（殺球高密度 = 動態模糊感）             */
+const SHOT_FX = {
+  S:{color:'#f87171', width:5,  dash:null,  dur:300, height:.10, trail:.95, label:'殺球',   icon:'💥', shake:true },
+  D:{color:'#5eead4', width:2.5,dash:'6 5', dur:700, height:.55, trail:.35, label:'切球',   icon:'💧', shake:false},
+  C:{color:'#c084fc', width:3,  dash:'2 8', dur:880, height:1.0, trail:.45, label:'高遠球', icon:'🏸', shake:false},
+  L:{color:'#93c5fd', width:3,  dash:'2 8', dur:880, height:1.0, trail:.45, label:'挑球',   icon:'⬆️', shake:false},
+  P:{color:'#facc15', width:4,  dash:null,  dur:380, height:.15, trail:.80, label:'推撲',   icon:'⚡', shake:false},
+  V:{color:'#22d3ee', width:4.5,dash:null,  dur:330, height:.12, trail:.90, label:'平抽',   icon:'↔️', shake:false},
+  N:{color:'#f9a8d4', width:2,  dash:'3 4', dur:750, height:.35, trail:.30, label:'搓球',   icon:'🕸️', shake:false},
+  B:{color:'#fb923c', width:5,  dash:null,  dur:320, height:.10, trail:.92, label:'追身',   icon:'🎯', shake:true },
+};
+/* 對方球種 → 對應視覺鍵 */
+const OPPFX = {SMASH:'S', DROP:'D', NET:'N', BLOCK:'D', LIFT:'L', FLAT:'C', DRIVE:'V', SERVE:'N'};
+
+/* 擊球瞬間彈出的球種膠囊標籤 */
+function showBanner(x, y, fx, text){
+  const d = document.createElement('div');
+  d.className = 'shot-banner';
+  d.style.left = x+'px'; d.style.top = (y-24)+'px';
+  d.style.color = fx.color; d.style.borderColor = fx.color;
+  d.textContent = `${fx.icon} ${text}`;
+  $('.court-col').appendChild(d);
+  setTimeout(()=>d.remove(),1300);
+}
+/* 落點衝擊波（殺球雙重衝擊 + 震動球場） */
+function impact(x, y, fx){
+  const ring = n => {
+    const c = el('circle',{cx:x,cy:y,r:8+n*3,class:'impact',stroke:fx.color}, trajLayer);
+    setTimeout(()=>c.remove(),700);
+  };
+  ring(0);
+  if (fx.shake){
+    setTimeout(()=>ring(1),90);
+    svg.classList.add('court-shake');
+    setTimeout(()=>svg.classList.remove('court-shake'),350);
+  }
+}
+/* rAF 飛行動畫：貝茲曲線 + 高度縮放 + 殘影粒子 */
+async function animateShot(fromZone, toZone, fxKey, bannerText){
+  const fx = SHOT_FX[fxKey];
+  const a = ZONES[fromZone], b = ZONES[toZone];
+  const p0 = {x:a.cx, y:a.cy-10}, p2 = {x:b.cx, y:b.cy-10};
+  /* 側向微弧：直線球平直，弧線球帶一點側彎（俯視美化） */
+  const bend = fx.height >= .5 ? 22 : (fx.dash ? 10 : 0);
+  const side = p0.x === p2.x ? (p0.x < 190 ? 1 : -1) : 0;
+  const pc = {x:(p0.x+p2.x)/2 + side*bend, y:(p0.y+p2.y)/2};
+
+  showBanner(p0.x, p0.y, fx, bannerText);
+  const path = el('path',{d:`M${p0.x},${p0.y} Q${pc.x},${pc.y} ${p2.x},${p2.y}`,
+    class:'traj', fill:'none', stroke:fx.color, 'stroke-width':fx.width,
+    'stroke-linecap':'round', ...(fx.dash ? {'stroke-dasharray':fx.dash} : {})}, trajLayer);
+  setTimeout(()=>path.remove(),1600);
+
+  shuttleEl.style.transition = 'none';
+  const t0 = performance.now();
+  await new Promise(res=>{
+    let done = false;
+    /* 保底結算：分頁隱藏時 rAF 會暫停，用 setTimeout 確保流程不卡死 */
+    const finish = ()=>{
+      if (done) return;
+      done = true;
+      shuttleEl.style.transform = `translate(${p2.x}px,${p2.y}px) scale(1)`;
+      ball3D(p2.x, p2.y, 0);
+      res();
+    };
+    const step = now=>{
+      if (done) return;
+      const t = Math.min(1, (now-t0)/fx.dur);
+      const u = 1-t;
+      const x = u*u*p0.x + 2*u*t*pc.x + t*t*p2.x;
+      const y = u*u*p0.y + 2*u*t*pc.y + t*t*p2.y;
+      const s = 1 + fx.height*Math.sin(Math.PI*t)*0.95;   /* 高球升空放大 */
+      shuttleEl.style.transform = `translate(${x}px,${y}px) scale(${s})`;
+      ball3D(x, y, flightHeight(fxKey, t));               /* 3D 拋物線同步 */
+      if (rand() < fx.trail){
+        const dot = el('circle',{cx:x,cy:y,r:fxKey==='S'?3.2:2.2,fill:fx.color,
+          class:'trail-dot',opacity:.8}, trajLayer);
+        setTimeout(()=>dot.remove(),600);
+      }
+      if (t < 1) requestAnimationFrame(step); else finish();
+    };
+    requestAnimationFrame(step);
+    setTimeout(finish, fx.dur + 150);
+  });
+  shuttleEl.style.transition = '';
+  impact(p2.x, p2.y, fx);
+}
+function fx(text, cls){
+  const d = document.createElement('div');
+  d.className = 'fx-text ' + cls; d.textContent = text;
+  $('#fxOverlay').appendChild(d);
+  setTimeout(()=>d.remove(),1500);
+}
+
+/* ════════════════ 我方輪轉狀態機（State Pattern） ════════════════ */
+const rot = {
+  state:'NEUTRAL',
+  pos:{A:'M23', B:'M33'},   /* 微格站位：預設左右並排中後場 */
+  reset(weServe){
+    if (weServe){ this.state='ATTACK'; this.pos={B:'M31', A:'M23'}; }  /* B 網前發球 */
+    else        { this.state='DEFENSE'; this.pos={A:'M23', B:'M33'}; }
+    this.render();
+  },
+  render(instant=false){
+    placePlayer('A',this.pos.A,instant);
+    placePlayer('B',this.pos.B,instant);
+  },
+  /* 來球責任人：先比同微格，再比同宏區，再比同半場 */
+  coverer(cell){
+    for (const p of ['A','B']) if (this.pos[p]===cell) return p;
+    const m = macroOf(cell);
+    const inM = ['A','B'].filter(p=>macroOf(this.pos[p])===m);
+    if (inM.length===1) return inM[0];
+    if (inM.length===2){
+      const sameCol = inM.filter(p=>ZONES[this.pos[p]].col===ZONES[cell].col);
+      return sameCol[0] || inM[0];
+    }
+    const half = ZONES[cell].col<=2 ? 'L' : 'R';
+    const sameHalf = ['A','B'].filter(p=>(ZONES[this.pos[p]].col<=2?'L':'R')===half);
+    if (sameHalf.length) return sameHalf[0];
+    return pick(['A','B']);
+  },
+  /* 出手判定（站位已由玩家手動決定，不再自動輪轉走位）
+     若指派的擊球者不是球點上的責任人 → 搶球撞位失誤 */
+  async applyShot(hitter, shot, incomingZone){
+    const rightful = this.coverer(incomingZone);
+    let error=false, desc='', openZone='';
+    if (hitter !== rightful){
+      error = true;
+      openZone = macroOf(this.pos[hitter]);   /* 他棄守的宏區成為空門 */
+      desc = `${hitter} 從${ZNAME[this.pos[hitter]]}硬衝去搶 ${rightful} 位置上的球，動線交叉撞位`;
+      this.pos[hitter] = incomingZone;  /* 衝過去的視覺 */
+      this.render();
+      pEls.A.classList.add('collide'); pEls.B.classList.add('collide');
+      fx('💢 搶球撞位!', 'fx-warn');
+      await sleep(900);
+      pEls.A.classList.remove('collide'); pEls.B.classList.remove('collide');
+    } else if (this.pos[hitter] !== incomingZone){
+      this.pos[hitter] = incomingZone;  /* 責任人小碎步靠近球點 */
+      this.render();
+    }
+    this.state = ATTACK_CODES.includes(shot) ? 'ATTACK' : 'DEFENSE';
+    return {error, desc, openZone, rightful};
+  }
+};
+
+/* ════════════════ 對手 AI（球路因果 + 幽靈區生成） ════════════════ */
+const opp = {
+  pos:{X:'O23',Y:'O33'}, pressure:0,
+  reset(){ this.pos={X:'O23',Y:'O33'}; this.pressure=0; this.render(); this.gauge(); },
+  render(instant=false){ placePlayer('X',this.pos.X,instant); placePlayer('Y',this.pos.Y,instant); },
+  /* 幽靈區：兩人同擠一個半場 → 另一半場的兩個宏區大開 */
+  ghosts(){
+    const hx = ZONES[this.pos.X].col<=2, hy = ZONES[this.pos.Y].col<=2;
+    if (hx && hy)  return ['R3','R4'];
+    if (!hx && !hy) return ['L3','L4'];
+    return [];
+  },
+  lean(){
+    const hx = ZONES[this.pos.X].col<=2, hy = ZONES[this.pos.Y].col<=2;
+    return (hx&&hy) ? '左側' : (!hx&&!hy) ? '右側' : '';
+  },
+  /* 教科書輪轉聯動：玩家回球後，依球路自動站上標準位置（示範）
+     若玩家曾錄入 100% 教科書防守走位，AI 會模仿該劇本 */
+  reposition(ourShot, targetMicro){
+    let drift, usedWalk = false;
+    /* 3D 姿態：被壓迫時全隊壓低重心 */
+    const defending = 'SPVB'.includes(ourShot);
+    ['X','Y'].forEach(id=>window.p3d && p3d[id] &&
+      p3d[id].classList.toggle('crouch', defending));
+    if (defending){
+      /* 他們轉防守：左右並排中後（優先套用玩家錄入的走位劇本） */
+      const rec = walkLib.get('DEF');
+      if (rec && rec.length===2 && ZONES['O'+rec[0].slice(1)] && ZONES['O'+rec[1].slice(1)]){
+        this.pos.X = 'O'+rec[0].slice(1);
+        this.pos.Y = 'O'+rec[1].slice(1);
+        usedWalk = true;
+      } else { this.pos.X='O23'; this.pos.Y='O33'; }
+      drift = .35;
+    } else if ('DN'.includes(ourShot)){
+      /* 我方放小球/搓球：一人搶網、隊友補中後 */
+      const t = (targetMicro && ZONES[targetMicro]) ? targetMicro : 'O21';
+      this.pos.X = t;
+      this.pos.Y = 'O' + (ZONES[t].col<=2 ? 3 : 2) + '3';
+      drift = .35;
+    } else {
+      /* 我方高遠/挑球：他們轉進攻，一人上球點、隊友進中前封網 */
+      const t = (targetMicro && ZONES[targetMicro]) ? targetMicro : 'O24';
+      this.pos.X = t;
+      let y = 'O' + (ZONES[t].col<=2 ? 2 : 3) + '2';
+      if (y === t) y = 'O' + (ZONES[t].col<=2 ? 2 : 3) + '3';
+      this.pos.Y = y;
+      drift = .30;
+    }
+    /* 等級越高、走位越嚴謹（越少露出幽靈區） */
+    drift *= {basic:1.2, mid:1.0, high:0.6}[game.aiLevel] || 1;
+    if (rand() < drift){
+      const half = pick([1, 3]);   /* 兩人擠同一半場 → 露出幽靈區 */
+      this.pos.X = 'O' + half + '3';
+      this.pos.Y = 'O' + (half+1) + '2';
+    }
+    this.render(); renderGhosts();
+    return usedWalk;
+  },
+  addPressure(shot){
+    const d = PRESSURE_DELTA[shot];
+    this.pressure = d==='RESET' ? 0 : Math.min(100, this.pressure+d);
+    this.gauge();
+  },
+  gauge(){
+    $('#gauge').style.width = this.pressure+'%';
+    $('#gaugeNum').textContent = this.pressure+' / 100';
+  },
+  /* 回球決策：回傳 {event, shot, zone, lib?, reason?} */
+  respond(ourShot, rotErr, openZone, posError, posOpen){
+    /* 站位錯誤 → 對方 100% 直攻空檔 */
+    if (posError)
+      return {event:'OPP_WINNER', shot:'SMASH',
+              zone: posOpen || pick(MY_BACK), reason:'pos'};
+    if (rotErr && rand() < ROT_PUNISH)
+      return {event:'OPP_WINNER', shot:'SMASH', zone: MY_BACK.includes(openZone)?openZone:pick(MY_BACK)};
+    if (ourShot==='S' && this.pressure>=60 && rand() < (this.pressure-50)*.005)
+      return {event:'OPP_ERROR'};
+    /* 中/高級對手：優先從玩家收藏的戰術庫讀取「當年的精妙回球」反擊 */
+    const learned = tacticsLib.lookup(ourShot, game.aiLevel);
+    if (learned)
+      return {event:'REPLY', shot:learned.shot, zone:learned.zone, lib:learned.tier};
+    /* 初級對手（或戰術庫未命中）：標準隨機概率矩陣 */
+    const shot = wchoice(REPLY[ourShot]);
+    return {event:'REPLY', shot, zone: pick(OPP_SHOTS[shot].land)};
+  }
+};
+/* ════════════════ 雙階段核心：手動佔位（16 格微網格版） ════════════════ */
+const OPP_ATTACK_SHOTS = ['SMASH','DRIVE','FLAT'];
+/* 羽球幾何輪轉知識庫：情境 → 對方陣型 / 標準站位 / 修正心法 */
+const GUIDE_DB = {
+  SMASH:{situ:'對方殺球', oppForm:'前後進攻（殺手後場、封網手網前）',
+    std:'左右並排鎮守「中後場」', fix:'重心壓低、球拍立於身前，先擋回半場，別想一步反殺'},
+  DRIVE:{situ:'對方平抽快壓', oppForm:'平抽對峙、重心前傾',
+    std:'左右並排、站於中後排搶平抽對抗', fix:'手腕短促發力回抽，搶高點壓回去，別退到底線'},
+  FLAT:{situ:'對方平高球拉底線', oppForm:'並排拉鋸、伺機突擊',
+    std:'左右並排於中後場，準備輪轉反攻', fix:'側身讓位給後場拍，提早判斷落點移動'},
+  DROP:{situ:'對方切球放網前', oppForm:'前後進攻壓網',
+    std:'一人搶上「網前」處理、隊友坐鎮「中後」看管直線', fix:'第一步蹬地要快，撲不到就輕放回搓，別勉強挑高'},
+  NET:{situ:'對方網前回搓', oppForm:'貼網壓迫、伺機撲球',
+    std:'一人貼網對抗、隊友居「中前/中後」補挑球後路', fix:'拍頭保持高於網帶，搶在球翻滾下墜前出手'},
+  BLOCK:{situ:'對方被動擋小球', oppForm:'左右防守並排（被動）',
+    std:'一人跟進網前連續施壓、殺手留「中後」', fix:'保持前後站位，封死回搓與挑高兩條路'},
+  LIFT:{situ:'對方被動挑高（進攻機會！）', oppForm:'左右防守並排、重心下沉',
+    std:'前後站位：後場者上球點準備重殺、隊友進「中前」封網', fix:'封網者重心前傾，殺球後的擋回一律交給網前隊友'},
+  SERVE:{situ:'對方發短球', oppForm:'發球搶攻站位',
+    std:'接發者搶「網前」高點、隊友於「中後」接應', fix:'站位靠前、拍舉高，用推撲搶下第三拍主動權'},
+};
+/* 標準站位（微格級）：
+   對方進攻球 → 左右並排「中後」(M23+M33)
+   對方被動球 → 一人上球點、隊友補同半場的前後銜接位 */
+function idealPositions(oppShot, cell){
+  if (OPP_ATTACK_SHOTS.includes(oppShot)) return ['M23','M33'];
+  const c = ZONES[cell];
+  const midCol = c.col<=2 ? 2 : 3;                 /* 補位者靠中路 */
+  const partnerRow = c.row<=2 ? 3 : 2;             /* 前場球補中後、後場球補中前 */
+  let partner = 'M' + midCol + partnerRow;
+  if (partner === cell) partner = 'M' + midCol + (partnerRow===3 ? 2 : 3);
+  return [cell, partner];
+}
+/* 雙打輪轉走位判定：宏區層計對錯、微格層認證「教科書站位」 */
+function evaluatePositions(oppShot, cell){
+  const pa = rot.pos.A, pb = rot.pos.B;
+  const ideal = idealPositions(oppShot, cell);
+  const perfect = (pa!==pb) &&
+    new Set([pa,pb]).size===2 && ideal.every(z=>[pa,pb].includes(z));
+  if (pa === pb)
+    return {ok:false, perfect:false,
+            msg:`A 與 B 擠在同一格（${ZNAME[pa]}），嚴重撞位`,
+            open: [...new Set(ideal.map(macroOf))].find(m=>m!==macroOf(pa)) || 'L1'};
+  const macros = new Set([macroOf(pa), macroOf(pb)]);
+  const idealMacros = [...new Set(ideal.map(macroOf))];
+  const missing = idealMacros.find(m=>!macros.has(m)) || idealMacros[0];
+  if (!macros.has(macroOf(cell)))
+    return {ok:false, perfect:false, msg:`沒有人到${ZNAME[cell]}一帶準備接球`, open: macroOf(cell)};
+  if (idealMacros.every(m=>macros.has(m))) return {ok:true, perfect};
+  const defensive = OPP_ATTACK_SHOTS.includes(oppShot);
+  const halfA = ZONES[pa].col<=2?'L':'R', halfB = ZONES[pb].col<=2?'L':'R';
+  if (defensive && halfA===halfB)
+    return {ok:false, perfect:false, msg:'對方火力壓境，你們卻擠在同一半場，另一半完全放空', open: missing};
+  if (defensive)
+    return {ok:false, perfect:false, msg:'防守應左右並排鎮守中後場，站位卻鬆散歪斜', open: missing};
+  return {ok:false, perfect:false, msg:'進攻佔位失衡，前後銜接出現斷層', open: missing};
+}
+function renderCoach(ideal){
+  coachLayer.innerHTML = '';
+  if (!ideal) return;
+  for (const z of ideal){
+    const c = ZONES[z];
+    el('circle',{cx:c.cx, cy:c.cy+16, r:17, class:'ghost-coach'}, coachLayer);
+  }
+  const c0 = ZONES[ideal[0]];
+  el('text',{x:c0.cx, y:c0.cy+44, class:'ghost-coach-label'}, coachLayer)
+    .textContent = '教練建議';
+}
+/* ── 走位劇本庫：玩家的教科書站位 → 錄為對手 AI 的移動劇本 ── */
+const walkLib = {
+  data:{},
+  load(){
+    try{ this.data = JSON.parse(localStorage.getItem('badminton_walk_lib_v1')) || {}; }
+    catch(e){ this.data = {}; }
+  },
+  save(key, cells){
+    this.data[key] = cells;
+    try{ localStorage.setItem('badminton_walk_lib_v1', JSON.stringify(this.data)); }catch(e){}
+  },
+  get(key){ return this.data[key]; },
+};
+/* ── 即時戰術語音板 ── */
+function updateVoice(oppShot, cell){
+  const board = $('#voiceBoard');
+  if (!board) return;
+  if (!game.showCoach){
+    board.innerHTML = '🕶️ 教練站位提示已關閉——憑直覺判斷，賽後見真章。';
+    return;
+  }
+  const g = GUIDE_DB[oppShot] || GUIDE_DB.DRIVE;
+  const ideal = idealPositions(oppShot, cell);
+  const status = ['A','B'].map(p=>{
+    const ok = ideal.includes(rot.pos[p]);
+    return `<b>${p}</b>${ok
+      ? ' <span style="color:#4ade80">✓ 已就位</span>'
+      : ` <span style="color:#f87171">✗ 在${ZNAME[rot.pos[p]].replace('我方','')}</span>`}`;
+  }).join('　');
+  board.innerHTML =
+    `📢 <b style="color:var(--accent)">${g.situ}</b>（對方陣型：${g.oppForm}）<br>` +
+    `標準站位：<b style="color:#4ade80">${g.std}</b><br>` +
+    `建議格：${ideal.map(z=>ZNAME[z].replace('我方','')).join('＋')}<br>${status}`;
+}
+function clearCoach(){ coachLayer.innerHTML = ''; }
+function setHint(mode){
+  $('#stepHint').innerHTML = {
+    position:'🚦 <b style="color:#4ade80">第一階段｜佔位</b>：B 已智能補位，<b>點擊我方微格</b>移動你的 A，站好後按<b>確認站位</b>',
+    decide:'🏸 <b style="color:var(--accent)">第二階段｜擊球</b>：在擊球者頭上的<b>環形擊球盤</b>選球種',
+    target:'🎯 <b style="color:var(--accent)">選定球種！</b>點擊<b>對方微格</b>決定落點——紅色幽靈區勝率 85%',
+    serve:'🏸 <b style="color:var(--accent)">我方發球</b>：在 B 頭上的環形盤選擇【發短球】或【偷襲平高】',
+    idle:'先開賽，對方來球時進入「佔位 → 擊球」兩階段決策',
+  }[mode];
+}
+function clearMoveSel(){ /* A 專屬操控版：保留介面相容 */ }
+function onPlayerClick(id){ /* 像素小人不再需要點選；出拍由站位自動判定 */ }
+function markMyZones(on){
+  $$('.zone').forEach(z=>{
+    if (ZONES[z.dataset.zone].side==='us')
+      z.classList.toggle('targetable', on);
+  });
+}
+/* 時間壓迫感：走位倒數依對方球速動態調整（毫秒） */
+const POS_TIME = {
+  SMASH:3200, DRIVE:3800, FLAT:5000,
+  DROP:5500, NET:5500, BLOCK:5500, SERVE:6500, LIFT:8000,
+};
+function endPositioning(result){
+  if (game.posTimer){ clearInterval(game.posTimer); game.posTimer = null; }
+  $('#btnConfirmPos').style.display = 'none';
+  $('#posTimerWrap').style.display = 'none';
+  $('#posTimerNum').classList.remove('timer-panic');
+  if (game.posResolve){ const r = game.posResolve; game.posResolve = null; r(result); }
+}
+/* 第一階段：等待玩家佔位完成（按下確認站位 / 倒數歸零） */
+function waitPositioning(budget){
+  game.phase = 'position';
+  setHint('position');
+  markMyZones(true);
+  $('#btnConfirmPos').style.display = '';
+  $('#posTimerWrap').style.display = '';
+  const fill = $('#posTimerFill'), num = $('#posTimerNum');
+  fill.style.width = '100%';
+  if (game.manualMode){
+    /* ⏸ 手動模式：時間完全靜止，給大腦充分思考空間 */
+    num.textContent = '⏸ 手動模式：時間靜止，想清楚再確認站位';
+    num.classList.remove('timer-panic');
+  } else {
+    const t0 = performance.now();
+    game.posTimer = setInterval(()=>{
+      const left = Math.max(0, budget - (performance.now() - t0));
+      fill.style.width = (left/budget*100) + '%';
+      num.textContent = `⏱ 走位倒數 ${(left/1000).toFixed(1)} s`;
+      num.classList.toggle('timer-panic', left < 1500);
+      if (left <= 0) endPositioning({timeout:true});
+    }, 100);
+  }
+  return new Promise(res => game.posResolve = res);
+}
+
+function renderGhosts(){
+  ghostLayer.innerHTML='';
+  if (!game.showHints) return;
+  for (const z of opp.ghosts()){
+    const c = ZONES[z];
+    el('rect',{x:c.x+3,y:c.y+3,width:c.w-6,height:c.h-6,rx:8,class:'ghost-glow'}, ghostLayer);
+    el('text',{x:c.cx,y:c.cy-30,'text-anchor':'middle','font-size':20,'pointer-events':'none'}, ghostLayer).textContent='🔴';
+  }
+}
+
+/* ════════════════ 內建奧運金牌戰劇本（前 5 拍還原） ════════════════ */
+const CLASSIC = {
+  title:'2020 東京奧運男雙金牌戰・冠軍點還原',
+  target:21, my:20, oppScore:19,
+  script:[
+    {side:'OPP', shot:'SERVE', target:'R2', note:'對方深吸一口氣，發出貼網短球'},
+    {side:'US', hitter:'B', shot:'P', target:'L3', note:'隊友 B 電光石火上網推撲'},
+    {side:'OPP', shot:'DRIVE', target:'R1', note:'對方平抽直線，球速如子彈'},
+    {side:'US', hitter:'A', shot:'D', target:'R3', note:'你手腕一抖，滾網切球剎住節奏'},
+    {side:'OPP', shot:'LIFT', target:'L1', note:'對方重心不穩，勉強挑向你的左後場！'},
+  ],
+};
+
+/* ════════════════ 動態戰術庫（玩家戰術匯入對手大腦） ════════════════
+   儲存結構：{green:[], yellow:[], red:[]}，每筆 = 一組「觸發→回擊」對：
+     trigger  : 我方球種代碼（當年對手用這種球攻擊玩家）
+     shot     : 對方回球種（玩家當年精妙回球的鏡像轉換）
+     zone     : 落點（玩家打向對方場的目標，鏡像映射回我方場）
+   ═══════════════════════════════════════════════════════════════ */
+const LIB_KEY = 'badminton_tactics_lib_v1';
+const TIER_NAME = {green:'🟢 初級戰術', yellow:'🟡 中級戰術', red:'🔴 高級戰術'};
+/* 對方球種 → 等價我方代碼（作為觸發鍵） */
+const OPP2CODE = {SMASH:'S',DROP:'D',NET:'N',BLOCK:'D',DRIVE:'V',LIFT:'L',FLAT:'C',SERVE:'N'};
+/* 我方代碼 → 對方回擊時的等價球種 */
+const CODE2OPPSHOT = {S:'SMASH',D:'DROP',C:'FLAT',L:'LIFT',P:'DRIVE',V:'DRIVE',N:'NET',B:'DRIVE'};
+/* 對方場落點 鏡像映射到 我方場（跨網同欄：3↔2、4↔1） */
+const mirrorZone = z => z[0] + (z[1]==='3' ? '2' : '1');
+
+const tacticsLib = {
+  data:{green:[], yellow:[], red:[]},
+  load(){
+    try{
+      const raw = localStorage.getItem(LIB_KEY);
+      if (raw){ const d = JSON.parse(raw);
+        this.data = {green:d.green||[], yellow:d.yellow||[], red:d.red||[]}; }
+    }catch(e){ /* localStorage 不可用時以記憶體模式運作 */ }
+    this.badge();
+  },
+  save(){
+    try{ localStorage.setItem(LIB_KEY, JSON.stringify(this.data)); }catch(e){}
+    this.badge();
+  },
+  clear(){
+    this.data = {green:[], yellow:[], red:[]}; this.save();
+    log('🗑 AI 戰術庫已清空，對手回到出廠設定。','f-sys');
+  },
+  badge(){
+    const d = this.data;
+    $('#libInfo').textContent =
+      `戰術庫 🟢${d.green.length} 🟡${d.yellow.length} 🔴${d.red.length}`;
+  },
+  /* 從勝利回合萃取所有「對方攻擊 → 玩家精妙回球」對 */
+  extractPairs(rallyLog){
+    const pairs = [];
+    for (let i=0; i+1<rallyLog.length; i++){
+      const a = rallyLog[i], b = rallyLog[i+1];
+      if (a.side==='OPP' && b.side==='US' && CODE2OPPSHOT[b.shot])
+        pairs.push({trigger:OPP2CODE[a.shot]||'P',
+                    shot:CODE2OPPSHOT[b.shot],
+                    zone:mirrorZone(b.target)});
+    }
+    return pairs;
+  },
+  addRally(tier, rallyLog){
+    const pairs = this.extractPairs(rallyLog);
+    if (!pairs.length){ log('⚠ 此回合沒有可萃取的回球路徑。','f-sys'); return; }
+    this.data[tier].push(...pairs);
+    this.save();
+    log(`🌟 已將 ${pairs.length} 組回球路徑收錄為 <b>${TIER_NAME[tier]}</b>！`+
+        `中/高級對手將學會用這些招式反擊你。`,'f-ghost');
+  },
+  /* 依對手等級查找可反擊的玩家戰術 */
+  lookup(ourShot, level){
+    if (level==='basic') return null;
+    const tiers = level==='mid' ? ['green','yellow'] : ['green','yellow','red'];
+    const useProb = level==='mid' ? .5 : .8;
+    const cand = [];
+    for (const t of tiers)
+      for (const e of this.data[t])
+        if (e.trigger===ourShot) cand.push({...e, tier:t});
+    if (!cand.length || rand() >= useProb) return null;
+    /* 高級對手優先動用最高階戰術 */
+    const rank = {red:3, yellow:2, green:1};
+    cand.sort((a,b)=>rank[b.tier]-rank[a.tier]);
+    return pick(cand.filter(c=>c.tier===cand[0].tier));
+  },
+};
+
+/* 每分結束後的控制列：🎬 回放 ＋ 🌟 收藏（勝方限定）＋ ➡ 繼續 */
+let collectResolve = null;
+function offerPostRally(won, rallyLog, frames){
+  return new Promise(res=>{
+    collectResolve = {res, rallyLog};
+    game.postFrames = frames;
+    $('#btnCollect').style.display =
+      (won && tacticsLib.extractPairs(rallyLog).length) ? '' : 'none';
+    $('#collectStep1').style.display = '';
+    $('#collectStep2').style.display = 'none';
+    $('#collectBar').style.display = '';
+  });
+}
+function closeCollect(){
+  $('#collectBar').style.display = 'none';
+  if (collectResolve){ const r = collectResolve.res; collectResolve = null; r(); }
+}
+/* ════════════════ 一分球 3D 逐拍回放（Rally Replay） ════════════════ */
+async function replayRally(frames){
+  if (!frames || !frames.length) return;
+  game.replaying = true; game.rpPaused = false;
+  const panel = $('#replayPanel');
+  panel.style.display = ''; $('#rpPause').textContent = '⏸ 暫停';
+  $('#rpFill').style.width = '0%';
+  const savedPos = {A:rot.pos.A, B:rot.pos.B, X:opp.pos.X, Y:opp.pos.Y};
+  for (let i=0; i<frames.length; i++){
+    while (game.rpPaused && game.replaying) await sleep(150);
+    if (!game.replaying) break;
+    const f = frames[i];
+    /* 還原此拍當下的四人站位 */
+    rot.pos.A=f.pos.A; rot.pos.B=f.pos.B; opp.pos.X=f.pos.X; opp.pos.Y=f.pos.Y;
+    rot.render(); opp.render();
+    $('#rpFill').style.width = ((i+1)/frames.length*100) + '%';
+    const who = f.side==='US' ? `我方 ${f.hitter}` : '對方';
+    const nm  = f.side==='US' ? SHOTS[f.shot].name : OPP_SHOTS[f.shot].name;
+    $('#replaySub').textContent =
+      `第 ${i+1}/${frames.length} 拍｜${who}【${nm}】→ ${ZNAME[f.to]}` +
+      (f.note ? `｜${f.note}` : '');
+    movePiece(shuttleEl, ZONES[f.from].cx, ZONES[f.from].cy-10, true);
+    await sleep(260);
+    await animateShot(f.from, f.to,
+      f.side==='US' ? f.shot : (OPPFX[f.shot]||'P'),
+      f.side==='US' ? `${f.hitter}．${SHOT_FX[f.shot].label}!` : OPP_SHOTS[f.shot].name);
+    await sleep(430);
+  }
+  $('#replaySub').textContent = '🎬 回放結束——輪轉細節都看清楚了嗎？';
+  await sleep(800);
+  panel.style.display = 'none';
+  game.replaying = false;
+  /* 還原賽況站位 */
+  rot.pos.A=savedPos.A; rot.pos.B=savedPos.B;
+  opp.pos.X=savedPos.X; opp.pos.Y=savedPos.Y;
+  rot.render(); opp.render();
+}
+
+/* ════════════════ 比賽主引擎 ════════════════ */
+const game = {
+  running:false, phase:'idle', showHints:true, aiLevel:'basic',
+  blindTries:[], lockReason:'', serveSpec:null, serveResolve:null,
+  target:11, my:0, oppScore:0, weServe:false, rallyNo:0,
+  sel:{hitter:null, shot:null},
+  incoming:null, decisionResolve:null,
+  stats:null, moments:[], rallies:[], curLog:[], scoreAtStart:[0,0],
+};
+
+function log(html, cls='f-sys'){
+  const d = document.createElement('div');
+  d.className = cls; d.innerHTML = html;
+  const feed = $('#feed');
+  feed.prepend(d);
+  while (feed.children.length > 80) feed.lastChild.remove();
+}
+function updateScoreUI(){
+  $('#scoreMy').textContent = game.my;
+  $('#scoreOpp').textContent = game.oppScore;
+  $('#rallyInfo').textContent = game.running ? `第 ${game.rallyNo} 回合｜先得 ${game.target} 分` : '尚未開賽';
+  const mp = game.running && Math.max(game.my, game.oppScore) === game.target-1;
+  $('#mpFlag').innerHTML = mp ? '<span class="matchpoint">🔥 關鍵分！</span>' : '';
+}
+function setControls(enabled){ /* 舊按鈕列已由環形擊球盤取代 */ }
+function clearSelection(){
+  game.sel = {shot:null};
+  $$('.zone').forEach(z=>z.classList.remove('targetable','locked'));
+  suggestRing.style.display='none';
+  hidePie();
+}
+/* 標記對方半場可點格：rows/cols 限制外的格子鎖灰（物理鐵律視覺化） */
+function markOppZones(on, rows, cols){
+  $$('.zone').forEach(zEl=>{
+    const c = ZONES[zEl.dataset.zone];
+    if (c.side!=='opp') return;
+    const legal = (!rows || rows.includes(c.row)) && (!cols || cols.includes(c.col));
+    zEl.classList.toggle('targetable', on && legal);
+    zEl.classList.toggle('locked', on && !legal);
+  });
+}
+/* ── 隨身環形擊球盤（Pie Menu）── */
+function showPie(anchorCell, items, cb){
+  const pm = $('#pieMenu');
+  pm.innerHTML = ''; pm.style.display = '';
+  const c = ZONES[anchorCell];
+  pm.style.left = Math.min(292, Math.max(88, c.cx)) + 'px';
+  pm.style.top  = Math.min(586, Math.max(96, c.cy+16)) + 'px';
+  const n = items.length, R = n > 5 ? 86 : 62;
+  items.forEach((it, i)=>{
+    const a = (-90 + i*(360/n)) * Math.PI/180;
+    const b = document.createElement('button');
+    b.className = 'pie-item';
+    b.style.left = (R*Math.cos(a) - 26) + 'px';
+    b.style.top  = (R*Math.sin(a) - 26) + 'px';
+    b.style.animationDelay = (i*28) + 'ms';
+    b.innerHTML = `<span class="ico">${it.icon}</span>${it.label}`;
+    if (it.locked){
+      b.classList.add('locked');
+      b.addEventListener('click', ()=>log(
+        `🔒 <b>${it.label}已被鎖定</b>：${game.lockReason || '當前手位/區域不允許此球路'}`,'f-err'));
+    } else {
+      b.addEventListener('click', ()=>{ hidePie(); cb(it.code); });
+    }
+    pm.appendChild(b);
+  });
+}
+function hidePie(){
+  const pm = $('#pieMenu');
+  if (pm){ pm.style.display = 'none'; pm.innerHTML = ''; }
+}
+function onZoneClick(z){
+  if (game.replaying) return;
+  /* 第一階段：點我方格子 → 移動 Player_A（隊友 B 已智能補位） */
+  if (game.phase==='position'){
+    if (ZONES[z].side!=='us'){ log('⚠ 佔位階段只能站在我方半場。','f-sys'); return; }
+    rot.pos.A = z;
+    rot.render();
+    if (game.curSituation) updateVoice(game.curSituation.shot, game.curSituation.cell);
+    return;
+  }
+  /* 發球階段：對角線發球鐵律 */
+  if (game.phase==='serve' && game.serveSpec){
+    if (ZONES[z].side!=='opp') return;
+    const c = ZONES[z];
+    if (!game.serveSpec.cols.includes(c.col)){
+      log('🚫 <b>發球必須發向對角線區域！</b>同側發球直接違例。','f-err');
+      game.blindTries.push({shot:'SERVE', cell:z, why:'同側發球違例'});
+      return;
+    }
+    if (!game.serveSpec.rows.includes(c.row)){
+      log(`🚫 ${game.serveSpec.type==='SHORT'
+        ? '<b>短發必須落在「中前」——沒過前發球線就是出界！</b>'
+        : '<b>偷襲平高必須落在「中後」——超過雙打後發球線就是出界！</b>'}`,'f-err');
+      game.blindTries.push({shot:'SERVE', cell:z, why:'發球落點違反發球區界線'});
+      return;
+    }
+    markOppZones(false);
+    if (game.serveResolve){ const r=game.serveResolve; game.serveResolve=null; r(z); }
+    return;
+  }
+  if (game.phase!=='decide') return;
+  if (ZONES[z].side!=='opp') return;
+  if (!game.sel.shot){
+    log('⚠ 先在擊球者頭上的環形擊球盤選擇球種。','f-sys');
+    return;
+  }
+  /* 物理鐵律：落點必須在該球路的合法軌跡範圍內 */
+  const rowsAllowed = TARGET_ROWS[game.sel.shot];
+  if (!rowsAllowed.includes(ZONES[z].row)){
+    log(`🚫 <b>${SHOTS[game.sel.shot].name}的物理軌跡到不了 ${ZNAME[z]}！</b>灰色格子是禁區。`,'f-err');
+    game.blindTries.push({shot:game.sel.shot, cell:z, why:'落點超出球路物理範圍'});
+    return;
+  }
+  const d = {hitter:game.curHitter, shot:game.sel.shot, target:z};
+  game.phase='animating';
+  clearSelection();
+  if (game.decisionResolve){ const r=game.decisionResolve; game.decisionResolve=null; r(d); }
+}
+/* 第二階段：擊球者由站位自動判定，環形擊球盤在其頭上彈出 */
+const PIE_SHOTS = [
+  {code:'S', icon:'💥', label:'殺球'}, {code:'V', icon:'↔️', label:'平抽'},
+  {code:'B', icon:'🎯', label:'追身'}, {code:'P', icon:'⚡', label:'推撲'},
+  {code:'N', icon:'🕸️', label:'搓球'}, {code:'D', icon:'💧', label:'切球'},
+  {code:'C', icon:'🏸', label:'高遠'}, {code:'L', icon:'⬆️', label:'挑球'},
+];
+function waitDecision(hitter, allowed){
+  game.phase='decide';
+  setHint('decide');
+  game.curHitter = hitter;
+  game.sel = {shot:null};
+  if (game.showHints){
+    const c = ZONES[rot.pos[hitter]];
+    suggestRing.setAttribute('cx', c.cx);
+    suggestRing.setAttribute('cy', c.cy+16);
+    suggestRing.style.display='';
+  }
+  if (game.showCoach && $('#voiceBoard'))
+    $('#voiceBoard').innerHTML =
+      `🏸 由 <b>${hitter==='A'?'你（A）':'智能隊友 B'}</b> 出拍！`+
+      `在環形擊球盤選球種，再點擊對方微格落點——瞄準 🔴 幽靈區勝率最高。`;
+  /* 物理鐵律：手位不合規的球種在環形盤上鎖灰 */
+  const items = PIE_SHOTS.map(it=>({...it, locked: allowed && !allowed.includes(it.code)}));
+  return new Promise(res=>{
+    game.decisionResolve = res;
+    showPie(rot.pos[hitter], items, code=>{
+      game.sel.shot = code;
+      markOppZones(true, TARGET_ROWS[code]);   /* 落點依球路軌跡鎖定 */
+      setHint('target');
+    });
+  });
+}
+
+/* ── 對方擊球動畫（球種視覺語言） ── */
+async function oppShotAnim(shot, fromZone, toZone, note){
+  const S = OPP_SHOTS[shot];
+  if (game.replayFrames) game.replayFrames.push({side:'OPP', shot,
+    from:fromZone, to:toZone, note,
+    pos:{A:rot.pos.A, B:rot.pos.B, X:opp.pos.X, Y:opp.pos.Y}});
+  await animateShot(fromZone, toZone, OPPFX[shot] || 'P', S.name);
+  log(`對方 ${S.icon}<b>${S.name}</b> → ${ZNAME[toZone]}${note?`<br><i style="opacity:.7">${note}</i>`:''}`,'f-opp');
+  game.curLog.push({side:'OPP', shot, target:macroOf(toZone)});
+  game.stats.shots++;
+}
+async function ourShotAnim(hitter, shot, fromZone, toZone, note){
+  const S = SHOTS[shot];
+  if (game.replayFrames) game.replayFrames.push({side:'US', hitter, shot,
+    from:fromZone, to:toZone, note,
+    pos:{A:rot.pos.A, B:rot.pos.B, X:opp.pos.X, Y:opp.pos.Y}});
+  await animateShot(fromZone, toZone, shot, `${hitter}．${SHOT_FX[shot].label}!`);
+  log(`我方 <b>${hitter}</b> ${S.icon}<b>${S.name}</b> → ${ZNAME[toZone]}${note?`<br><i style="opacity:.7">${note}</i>`:''}`,'f-us');
+  game.curLog.push({side:'US', hitter, shot, target:macroOf(toZone)});
+  game.stats.shots++;
+}
+
+/* ── 單一回合 ── */
+async function playRally(openingScript){
+  game.rallyNo++; game.curLog=[]; game.replayFrames=[];
+  game.scoreAtStart=[game.my, game.oppScore];
+  rot.reset(game.weServe); opp.reset(); renderGhosts();
+  updateScoreUI();
+  log(`── 第 ${game.rallyNo} 回合開始（${game.my}:${game.oppScore}）──`,'f-sys');
+  await sleep(700);
+
+  let incoming;   /* {shot, zone} 對方來球 */
+  if (openingScript){
+    incoming = await runScript(openingScript);
+  } else if (game.weServe){
+    /* 我方發球權：偶數分右發球區、奇數分左發球區（真實規則聯動） */
+    const even = game.my % 2 === 0;
+    rot.pos.B = even ? 'M31' : 'M21';
+    rot.pos.A = even ? 'M23' : 'M33';
+    rot.render();
+    setHint('serve');
+    log(`🏸 我方發球權（比分 ${game.my} 為${even?'偶數 → 右':'奇數 → 左'}發球區）：選擇發球戰術……`,'f-us');
+    movePiece(shuttleEl, ZONES[rot.pos.B].cx, ZONES[rot.pos.B].cy-10, true);
+    game.phase = 'serve';
+    const sv = await new Promise(res=>showPie(rot.pos.B, [
+      {code:'SHORT', icon:'🤏', label:'發短球'},
+      {code:'FLICK', icon:'🚀', label:'偷襲平高'},
+    ], res));
+    /* 對角線發球鐵律：只開放對角半場；
+       短發須過「前發球線」→ 限中前排（網前=未過線出界）
+       偷襲平高受「雙打後發球線」限制 → 限中後排（深區=出界） */
+    const diagCols = ZONES[rot.pos.B].col <= 2 ? [3,4] : [1,2];
+    const rows = sv==='SHORT' ? [2] : [3];
+    game.serveSpec = {type:sv, cols:diagCols, rows};
+    markOppZones(true, rows, diagCols);
+    log(`📏 對角線鐵律生效：只能發向${diagCols[0]===1?'對方左':'對方右'}半區的`+
+        `${sv==='SHORT'?'「中前」（須過前發球線，貼網是出界）':'「中後」（雙打後發球線內，深區出界）'}`+
+        `（灰格 = 違例區）。`,'f-sys');
+    const sT = await new Promise(res=> game.serveResolve = res);
+    game.serveSpec = null;
+    game.phase = 'animating';
+    if (sv === 'SHORT'){
+      await ourShotAnim('B','P', rot.pos.B, sT, '貼網短發，壓住對方接發高度');
+      opp.reposition('D', sT);
+      const rshot = wchoice([['NET',.35],['DRIVE',.35],['LIFT',.30]]);
+      const rzone = microIn(pick(OPP_SHOTS[rshot].land));
+      await sleep(350);
+      await oppShotAnim(rshot, sT, rzone);
+      incoming = {shot:rshot, zone:rzone};
+    } else {
+      await ourShotAnim('B','C', rot.pos.B, sT, '🚀 偷襲後場！平高球直取對角深區');
+      opp.reposition('C', sT);
+      const rshot = wchoice([['SMASH',.45],['DROP',.30],['FLAT',.25]]);
+      const rzone = microIn(pick(OPP_SHOTS[rshot].land));
+      await sleep(350);
+      await oppShotAnim(rshot, sT, rzone);
+      incoming = {shot:rshot, zone:rzone};
+    }
+  } else {
+    const zone = microIn(pick(OPP_SHOTS.SERVE.land), 2);   /* 短發落中前（過前發球線才界內） */
+    const from = opp.pos.X;
+    movePiece(shuttleEl, ZONES[from].cx, ZONES[from].cy-10, true);
+    await sleep(400);
+    await oppShotAnim('SERVE', from, zone);
+    incoming = {shot:'SERVE', zone};
+  }
+
+  let winner = null;
+  while (!winner){
+    const ghosts = opp.ghosts();
+    renderGhosts();
+
+    /* ══ 第一階段：手動佔位（限時！球速越快、倒數越短）══ */
+    const ideal = idealPositions(incoming.shot, incoming.zone);
+    /* 🤖 智能隊友：接球責任判定——「誰離球近、誰上球點」
+       球在 B 側 → B 上前擊球、你補互補位；球在你側 → B 讓位補防，球交給你 */
+    const cd = (a,b)=>Math.hypot(ZONES[a].cx-ZONES[b].cx, ZONES[a].cy-ZONES[b].cy);
+    let bCell;
+    if (ideal.includes(incoming.zone)){
+      /* 進攻/接發情境：理想位含球點 → 距離球較近者負責擊球 */
+      const partnerCell = ideal.find(z=>z!==incoming.zone) || ideal[0];
+      bCell = cd(rot.pos.B, incoming.zone) < cd(rot.pos.A, incoming.zone)
+            ? incoming.zone : partnerCell;
+    } else {
+      /* 防守情境（並排）：B 鎮守離自己較近的半場 */
+      bCell = cd(rot.pos.B, ideal[0]) <= cd(rot.pos.B, ideal[1]) ? ideal[0] : ideal[1];
+    }
+    rot.pos.B = bCell; rot.render();
+    log(bCell === incoming.zone
+      ? `🤖 隊友 B 離球較近，<b>由 B 上球點準備擊球</b>，你補 ${ZNAME[ideal.find(z=>z!==bCell)||ideal[0]]}`
+      : `🤖 隊友 B 智能補位 → ${ZNAME[bCell]}，<b>這顆球歸你接</b>`,'f-us');
+    /* 3D 像素小人：防守情境全隊壓低重心 */
+    setCrouch(OPP_ATTACK_SHOTS.includes(incoming.shot));
+    if (game.showCoach) renderCoach(ideal);   /* 教練影子：綠色標準站位 */
+    game.curSituation = {shot: incoming.shot, cell: incoming.zone};
+    updateVoice(incoming.shot, incoming.zone);            /* 即時戰術語音板 */
+    const budget = POS_TIME[incoming.shot] || 5000;
+    const posResult = await waitPositioning(budget);
+    clearCoach(); clearMoveSel(); markMyZones(false);
+    game.stats.posDecisions++;
+    const situ = game.situStats[incoming.shot] ||
+                 (game.situStats[incoming.shot] = {seen:0, ok:0, perfect:0});
+    situ.seen++;
+    let posError = false, posOpen = '';
+    if (posResult && posResult.timeout){
+      /* 超時：無人到位 → 球直接落地失分；有人到位 → 判定被動受迫 */
+      game.stats.posErrors++;
+      const covered = new Set([rot.pos.A, rot.pos.B]).has(incoming.zone);
+      if (!covered){
+        game.moments.push({type:'pos', rally:game.rallyNo, score:[...game.scoreAtStart],
+          oppShot:OPP_SHOTS[incoming.shot].name, zone:incoming.zone,
+          msg:'走位倒數歸零，無人到位攔截', open:incoming.zone});
+        log(`⏱💀 <b>超時！</b>${OPP_SHOTS[incoming.shot].name}無人攔截，直接落在 ${incoming.zone} 場內！`,'f-lose');
+        fx('TIME UP','fx-lose');
+        winner = 'OPP';
+        break;
+      }
+      const evT = evaluatePositions(incoming.shot, incoming.zone);
+      posError = true;
+      posOpen = (!evT.ok && evT.open) ||
+                (ZONES[incoming.zone].col<=2 ? 'R1' : 'L1');
+      game.moments.push({type:'pos', rally:game.rallyNo, score:[...game.scoreAtStart],
+        oppShot:OPP_SHOTS[incoming.shot].name, zone:incoming.zone,
+        msg:'走位倒數歸零，倉促成型的站位重心不穩', open:posOpen});
+      pEls.A.classList.add('collide'); pEls.B.classList.add('collide');
+      fx('⏱ 超時受迫!','fx-warn');
+      log(`⏱🚨 <b>[超時受迫]</b> 走位還沒完成就被球追上！${posOpen} 門戶洞開！`,'f-err');
+      await sleep(900);
+      pEls.A.classList.remove('collide'); pEls.B.classList.remove('collide');
+    } else {
+      const ev = evaluatePositions(incoming.shot, incoming.zone);
+      if (!ev.ok){
+        posError = true; posOpen = ev.open;
+        game.stats.posErrors++;
+        game.moments.push({type:'pos', rally:game.rallyNo, score:[...game.scoreAtStart],
+          oppShot:OPP_SHOTS[incoming.shot].name, zone:incoming.zone,
+          msg:ev.msg, open:ev.open});
+        pEls.A.classList.add('collide'); pEls.B.classList.add('collide');
+        fx('🚨 站位錯誤!','fx-warn');
+        log(`🚨 <b>[站位錯誤]</b> ${ev.msg}！${ev.open} 已是不設防的空門！`,'f-err');
+        await sleep(900);
+        pEls.A.classList.remove('collide'); pEls.B.classList.remove('collide');
+      } else {
+        situ.ok++;
+        if (ev.perfect){
+          situ.perfect++;
+          log('📐 <b>教科書站位！</b>與國家隊標準分毫不差。','f-win');
+          if (OPP_ATTACK_SHOTS.includes(incoming.shot)){
+            walkLib.save('DEF', [rot.pos.A, rot.pos.B]);
+            log('👣 此防守走位已錄入「走位劇本庫」——對手將學習模仿你的移動。','f-ghost');
+          }
+        } else {
+          log('✅ 站位到位，攻防陣型完整。','f-us');
+        }
+      }
+    }
+
+    /* ══ 第二階段：擊球決策（手位判定 → 動態鎖定球種）══ */
+    const suggested = rot.coverer(incoming.zone);
+    /* 高手位 = 擊球者第一時間到位；走位慢/超時 = 低手位被動接球 */
+    const hand = (!(posResult && posResult.timeout) &&
+                  rot.pos[suggested] === incoming.zone) ? 'high' : 'low';
+    const allowed = allowedShots(incoming.zone, hand);
+    const lockedAtk = ['S','P'].filter(c=>
+      allowedShots(incoming.zone,'high').includes(c) && !allowed.includes(c));
+    game.lockReason = hand==='low'
+      ? '擊球點已下墜到低手位——步伐慢了一步' : '';
+    if (hand==='low' && lockedAtk.length){
+      game.moments.push({type:'lock', rally:game.rallyNo, score:[...game.scoreAtStart],
+        cell:incoming.zone, locked:lockedAtk.map(c=>SHOT_FX[c].label)});
+      log(`⚠ <b>[低手位]</b> 走位慢半拍，擊球點已下墜！`+
+          `${lockedAtk.map(c=>SHOT_FX[c].label).join('、')}被鎖定，只能過渡球路。`,'f-err');
+    } else if (hand==='high' && ZONES[incoming.zone].row===1){
+      log('⚡ <b>[高手位]</b> 第一時間前壓迎球，撲球解鎖！','f-win');
+    }
+    const d = await waitDecision(suggested, allowed);
+
+    game.stats.decisions++;
+
+    /* 幽靈區統計（無論提示開關都默默記錄；以宏區判定） */
+    const tMac = macroOf(d.target);
+    let exploited = false;
+    if (ghosts.length){
+      game.stats.ghostOpps++;
+      if (ghosts.includes(tMac)){ exploited=true; game.stats.ghostHits++; }
+      else game.moments.push({type:'miss', rally:game.rallyNo, score:[...game.scoreAtStart],
+        ghosts:[...ghosts], chosen:tMac, lean:opp.lean()});
+    }
+    /* 輪轉狀態機 + 撞位判定 */
+    const res = await rot.applyShot(d.hitter, d.shot, incoming.zone);
+    if (res.error){
+      game.stats.rotErrors++;
+      game.moments.push({type:'err', rally:game.rallyNo, score:[...game.scoreAtStart],
+        zone:incoming.zone, desc:res.desc, open:res.openZone, rightful:res.rightful});
+      log(`💢 <b>[Rotation Error]</b> ${res.desc}！${res.openZone} 空門大開！`,'f-err');
+    }
+
+    await ourShotAnim(d.hitter, d.shot, incoming.zone, d.target);
+
+    setCrouch(false);
+    /* 教科書輪轉聯動：對手依我方球路自動站上標準位置（示範） */
+    const usedWalk = opp.reposition(d.shot, d.target);
+    if (usedWalk)
+      log('👣 <b>對手正在模仿你錄入的教科書防守走位！</b>','f-ghost');
+
+    /* ① 主動失誤 */
+    if (rand() < UNFORCED[d.shot]){
+      log(`😱 這拍${SHOTS[d.shot].name}手感失準，${pick(['掛網下墜','壓線出界','打到拍框'])}！`,'f-lose');
+      fx('MISS…','fx-lose'); winner='OPP'; break;
+    }
+    /* ② 擊中幽靈區 → 85% 直接得分 */
+    if (exploited){
+      if (rand() < GHOST_RATE){
+        log(`🎯 <b>一拍撕裂防線！</b>球狠狠釘進 ${ZNAME[d.target]}（${tMac} 幽靈區），對方連拍框都碰不到！`,'f-win');
+        game.moments.push({type:'good', rally:game.rallyNo, score:[...game.scoreAtStart],
+          zone:tMac, lean:opp.lean()});
+        fx('POINT!','fx-win'); winner='US'; break;
+      }
+      log('對方魚躍飛撲，竟然把球救了回來！但已完全失去重心……','f-ghost');
+      opp.pressure = Math.min(100, opp.pressure+30); opp.gauge();
+    }
+    opp.addPressure(d.shot);
+
+    /* ③ 一般直接得分（殺球隨被動值加成） */
+    const winP = WINNER_BASE[d.shot] + (d.shot==='S' ? opp.pressure*.0025 : 0);
+    if (!exploited && rand() < winP){
+      log(`🏸 <b>漂亮！</b>這記${SHOTS[d.shot].name}又急又刁，直接釘死在 ${ZNAME[d.target]}！`,'f-win');
+      fx('POINT!','fx-win'); winner='US'; break;
+    }
+    /* ④ 對方回球（輪轉懲罰 / 被動崩潰 / 正常因果） */
+    const r = opp.respond(d.shot, res.error, res.openZone, posError, posOpen);
+    if (r.event==='OPP_WINNER'){
+      await sleep(250);
+      const wMicro = microIn(r.zone);
+      await oppShotAnim(r.shot, d.target, wMicro);
+      log(r.reason==='pos'
+        ? `💀 對方早已看穿你們的站位破綻，一拍狠狠釘進無人看管的 ${r.zone}！<b>站位錯誤的代價，毫無懸念。</b>`
+        : `💀 對方毫不留情，一拍貫穿你們撞位後的空門 ${r.zone}！<b>輪轉失誤的代價。</b>`,'f-lose');
+      fx('LOST','fx-lose'); winner='OPP'; break;
+    }
+    if (r.event==='OPP_ERROR'){
+      log(`🔥 <b>連續重壓奏效！</b>對方被動值爆表（${opp.pressure}），勉強起球直接飛出底線！`,'f-win');
+      game.moments.push({type:'good2', rally:game.rallyNo, score:[...game.scoreAtStart], pressure:opp.pressure});
+      fx('POINT!','fx-win'); winner='US'; break;
+    }
+    if (r.lib)
+      log(`📖 <b>對手讀取了你的 ${TIER_NAME[r.lib]}！</b>用你當年的精妙回球反將一軍——`,'f-err');
+    const rMicro = microIn(r.zone);
+    await sleep(300);
+    await oppShotAnim(r.shot, d.target, rMicro);
+    incoming = {shot:r.shot, zone:rMicro};
+  }
+
+  /* 回合結算 */
+  const n = game.curLog.length;
+  game.stats.longest = Math.max(game.stats.longest, n);
+  game.rallies.push([n, game.curLog]);
+  if (winner==='US'){ game.my++; game.weServe=true; log(`✅ <b>我方得分！</b>（本回合 ${n} 拍）`,'f-win'); }
+  else { game.oppScore++; game.weServe=false; log(`✗ 對方得分。（本回合 ${n} 拍）`,'f-lose'); }
+  updateScoreUI();
+  /* 每分結束 → 回放 / 收藏 / 繼續 控制列 */
+  await offerPostRally(winner==='US', [...game.curLog], game.replayFrames.slice());
+  await sleep(600);
+}
+
+/* ── 劇本自動播放（經典大賽 / 匯入劇本共用），回傳最後一顆對方來球 ── */
+async function runScript(script){
+  log('📽️ ── 經典球路重播中，請感受節奏 ──','f-ghost');
+  let incoming = null;
+  let ballAt = null;
+  for (const e of script){
+    await sleep(500);
+    if (e.side==='OPP'){
+      const from = ballAt || opp.pos.X;
+      if (!ballAt) movePiece(shuttleEl, ZONES[from].cx, ZONES[from].cy-10, true);
+      const tMicro = microIn(e.target, e.shot==='SERVE' ? 2 : undefined);
+      await oppShotAnim(e.shot, from, tMicro, e.note);
+      incoming = {shot:e.shot, zone:tMicro};
+      ballAt = tMicro;
+    } else {
+      /* 重播示範：先站上標準微格位置（教科書佔位），再出手 */
+      if (incoming){
+        const ideal = idealPositions(incoming.shot, incoming.zone);
+        const partner = e.hitter==='A' ? 'B' : 'A';
+        rot.pos[e.hitter] = incoming.zone;
+        rot.pos[partner] = ideal.find(z=>z!==incoming.zone) || 'M23';
+        rot.render();
+        await sleep(400);
+      }
+      const tMicro = microIn(e.target);
+      await rot.applyShot(e.hitter, e.shot, ballAt || 'M33');
+      await ourShotAnim(e.hitter, e.shot, ballAt || rot.pos[e.hitter], tMicro, e.note);
+      opp.reposition(e.shot, tMicro);      /* 對手教科書輪轉示範 */
+      opp.addPressure(e.shot);
+      ballAt = tMicro;
+      incoming = null;
+    }
+  }
+  if (!incoming){
+    /* 劇本結束在我方拍 → 自動補一顆對方回球交給玩家 */
+    const last = script[script.length-1];
+    const shot = wchoice(REPLY[last.shot]);
+    const zone = microIn(pick(OPP_SHOTS[shot].land));
+    await sleep(400);
+    await oppShotAnim(shot, ballAt, zone);
+    incoming = {shot, zone};
+  }
+  log('🎬 ── 重播結束。<b>從這一拍起，歷史由你改寫！</b>──','f-ghost');
+  return incoming;
+}
+
+/* ── 整場比賽 ── */
+async function runMatch(opts){
+  if (game.running) return;
+  game.running = true;
+  game.target = opts.target; game.my = opts.my; game.oppScore = opts.oppScore;
+  game.weServe = false; game.rallyNo = 0;
+  game.stats = {shots:0, decisions:0, rotErrors:0, ghostOpps:0, ghostHits:0,
+                longest:0, posDecisions:0, posErrors:0};
+  game.moments = []; game.rallies = []; game.situStats = {}; game.blindTries = [];
+  $('#btnStart').disabled = $('#btnClassic').disabled = $('#btnImport').disabled = true;
+  $$('.settings input[type=number]').forEach(i=>i.disabled=true);
+  updateScoreUI();
+  log(`═══ 比賽開始！${opts.label}（先得 ${game.target} 分）═══`,'f-ghost');
+
+  let first = true;
+  while (game.my < game.target && game.oppScore < game.target){
+    await playRally(first ? opts.script : null);
+    first = false;
+  }
+  const won = game.my >= game.target;
+  fx(won ? '🏆 WIN!' : '💔 LOSE', won ? 'fx-win' : 'fx-lose');
+  await sleep(1200);
+  showReport(won);
+  game.running = false; game.phase='idle';
+  $('#btnStart').disabled = $('#btnClassic').disabled = $('#btnImport').disabled = false;
+  $$('.settings input[type=number]').forEach(i=>i.disabled=false);
+  updateScoreUI();
+}
+
+/* ════════════════ 賽後診斷講評 Modal ════════════════ */
+function showReport(won){
+  const s = game.stats;
+  const rotRate = s.decisions ? ((s.decisions - s.rotErrors)/s.decisions*100) : 100;
+  const posRate = s.posDecisions ? ((s.posDecisions - s.posErrors)/s.posDecisions*100) : 100;
+  /* 綜合紀律 = 站位 + 輪轉的整體正確率 */
+  const totalCalls = s.posDecisions + s.decisions;
+  const discipline = totalCalls
+    ? ((totalCalls - s.posErrors - s.rotErrors)/totalCalls*100) : 100;
+  $('#mPos').textContent = s.posDecisions ? posRate.toFixed(0)+'%' : '—';
+  $('#mVerdict').innerHTML = won
+    ? `最終比分 <b style="color:var(--accent)">${game.my} : ${game.oppScore}</b> ─ <span style="color:#4ade80;font-weight:800">🏆 恭喜獲勝！但冠軍的獎盃裡，藏著更冷酷的數據——</span>`
+    : `最終比分 <b style="color:var(--accent)">${game.my} : ${game.oppScore}</b> ─ <span style="color:#f87171;font-weight:800">💔 這場輸了。輸球不可恥，看不懂為什麼輸才可恥。</span>`;
+  $('#mShots').textContent = s.shots;
+  const perfectTotal = Object.values(game.situStats||{}).reduce((a,x)=>a+x.perfect,0);
+  $('#mRot').textContent = s.posDecisions
+    ? (perfectTotal/s.posDecisions*100).toFixed(0)+'%' : '—';
+  $('#mGhost').textContent = s.ghostOpps ? (s.ghostHits/s.ghostOpps*100).toFixed(0)+'%' : '—';
+
+  const box = $('#mMoments'); box.innerHTML='';
+  const add = (cls, html) => {
+    const d = document.createElement('div');
+    d.className='moment '+cls; d.innerHTML=html; box.appendChild(d);
+  };
+  if (!game.moments.length)
+    add('m-good','整場攻守分工乾淨俐落，沒有值得撕開來檢討的破綻。教練無話可說，只能鼓掌。👏');
+  for (const m of game.moments.slice(0,8)){
+    const sc = `比分 ${m.score[0]}:${m.score[1]}`;
+    if (m.type==='lock')
+      add('m-err',`✖ <b>第 ${m.rally} 回合（${sc}）</b>：因為你移動太慢，在 ${ZNAME[m.cell]} 的擊球點已經掉到低手位，系統鎖定了你的 ${m.locked.join('、')} 進攻球路——這就是實戰中步伐慢一步的代價。`);
+    else if (m.type==='pos')
+      add('m-err',`✖ <b>第 ${m.rally} 回合（${sc}）</b>：對方${m.oppShot}飛向 ${m.zone} 的瞬間，${m.msg}——${m.open} 成了不設防的空門，下一拍立刻被對方無情懲罰。站位判斷是雙打的第一生命線！`);
+    else if (m.type==='err')
+      add('m-err',`✖ <b>第 ${m.rally} 回合（${sc}）</b>：對方將球送到 ${m.zone}，${m.desc}，${m.open} 方向空門大開！此球應交由 <b>${m.rightful}</b> 直接處理，你應堅守崗位、保持陣型完整。`);
+    else if (m.type==='miss')
+      add('m-miss',`▲ <b>第 ${m.rally} 回合（${sc}）</b>：當時對方兩人重心已嚴重偏向${m.lean}，${m.ghosts.join('、')} 已露出大空檔！可惜你選擇打向 ${m.chosen}，錯失一拍定音、撕裂防線的絕佳機會！`);
+    else if (m.type==='good')
+      add('m-good',`★ <b>第 ${m.rally} 回合（${sc}）</b>：你精準捕捉到對方偏向${m.lean}的瞬間，一拍打穿 ${m.zone} 幽靈區——這就是國手級的戰術眼光，教科書等級的一擊！`);
+    else if (m.type==='good2')
+      add('m-good',`★ <b>第 ${m.rally} 回合（${sc}）</b>：連續進攻將對方被動值壓到 ${m.pressure}，對方回球崩潰失誤。用壓迫換取免費分，這是雙打最高級的贏法。`);
+  }
+  /* 空間感盲點：試圖點選不符物理的落點 → 戰術盲點修正建議 */
+  if ((game.blindTries||[]).length){
+    const bt = game.blindTries;
+    const eg = bt[0];
+    const egShot = eg.shot==='SERVE' ? '發球' : (SHOTS[eg.shot]?.name || eg.shot);
+    add('m-miss',
+      `▲ <b>戰術盲點｜球路與落點空間感不匹配</b>：本場你共 ${bt.length} 次試圖把球打向`+
+      `物理上到不了的格子（例如把「${egShot}」點向 ${ZNAME[eg.cell]}${eg.why?`——${eg.why}`:''}）。`+
+      `修正心法：<b>殺球/切球壓前三排、高遠/挑球只落後兩排、平抽鎖中場走廊、搓球絕對貼網、`+
+      `發球永遠走對角線</b>。把這張空間地圖刻進肌肉記憶。`);
+  }
+
+  /* 📘 雙打戰術大師指南：情境 × 對方站位 × 標準站位 × 修正心法 */
+  const guideBox = $('#mGuide'); guideBox.innerHTML = '';
+  const ORDER = ['SMASH','DRIVE','FLAT','DROP','NET','BLOCK','LIFT','SERVE'];
+  for (const k of ORDER){
+    const g = GUIDE_DB[k];
+    const st = (game.situStats||{})[k];
+    const perf = st
+      ? `本場遭遇 ${st.seen} 次｜站對 ${st.ok} 次${st.perfect?`（📐 教科書 ${st.perfect} 次）`:''}`
+      : '本場未遭遇此情境';
+    const d = document.createElement('div');
+    d.className = 'guide-row';
+    d.innerHTML =
+      `<div class="g-situ">${OPP_SHOTS[k]?OPP_SHOTS[k].icon:''} ${g.situ}</div>` +
+      `<div class="g-opp">對方站位：${g.oppForm}</div>` +
+      `<div class="g-std">✅ 我方標準：${g.std}</div>` +
+      `<div class="g-fix">🧠 修正心法：${g.fix}</div>` +
+      `<div class="g-perf">${perf}</div>`;
+    guideBox.appendChild(d);
+  }
+
+  let grade, word;
+  if (discipline>=90 && s.ghostHits>0){ grade='S'; word='站位如磐石、出手如手術刀。你已具備國家隊的雙打嗅覺。'; }
+  else if (discipline>=80){ grade='A'; word='佔位與輪轉紀律及格，但對幽靈區的嗅覺還差最後一哩路。多看錄影帶。'; }
+  else if (discipline>=60){ grade='B'; word='站位常慢半拍、又太想自己解決每一顆球。雙打是信任的運動——先站對位置，再把球讓給隊友。'; }
+  else { grade='C'; word='站錯位、搶球、撞位、漏空檔……今晚加練半場輪轉兩百趟，不練完不准回家。'; }
+  $('#mGrade').textContent = grade;
+  $('#mGradeWord').textContent = word;
+  $('#modalBack').classList.add('show');
+}
+
+/* ════════════════ 劇本 匯入 / 匯出 ════════════════ */
+const CODE2NAME = {S:'Smash',D:'Drop',C:'Clear',L:'Lift',P:'Push',V:'Drive',N:'NetDrop',B:'BodyShot'};
+const NAME2CODE = {SMASH:'S',DROP:'D',CLEAR:'C',LIFT:'L',PUSH:'P',NET:'N',NETDROP:'N',
+                   BLOCK:'P',DRIVE:'V',BODYSHOT:'B',SERVE:'P',FLAT:'C'};
+const NAME2OPP  = {SERVE:'SERVE',SMASH:'SMASH',DROP:'DROP',NET:'NET',BLOCK:'BLOCK',LIFT:'LIFT',FLAT:'FLAT',DRIVE:'DRIVE',CLEAR:'FLAT',PUSH:'DRIVE'};
+
+function exportScript(){
+  if (!game.rallies.length){ log('⚠ 尚無比賽紀錄可匯出，先打一場吧！','f-sys'); return; }
+  const [n, best] = game.rallies.reduce((a,b)=>b[0]>a[0]?b:a);
+  const lines = [`# Rally Script — 羽球雙打戰術模擬器（最長來回 ${n} 拍）`,
+                 `# Exported ${new Date().toLocaleString('zh-TW')}`, ''];
+  best.forEach((s,i)=>{
+    lines.push(s.side==='OPP'
+      ? `Shot ${i+1}: OPP ${s.shot[0]+s.shot.slice(1).toLowerCase()} -> ${s.target}`
+      : `Shot ${i+1}: US(${s.hitter}) ${CODE2NAME[s.shot]} -> ${s.target}`);
+  });
+  $('#scriptBox').value = lines.join('\n');
+  log(`📤 已匯出本場最精采的 ${n} 拍長來回至下方文字框，複製保存即可日後重載挑戰！`,'f-ghost');
+}
+function parseScript(text){
+  const strict = /Shot\s*(\d+)\s*:\s*(OPP|US)(?:\(([AB])\))?[\s_]+([A-Za-z]+)\s*(?:->|→)\s*([LR][1-4])/i;
+  const loose  = /Shot\s*(\d+)\s*:\s*([A-Za-z_]+)\s*(?:->|→)\s*([LR][1-4])/i;
+  const out = [];
+  for (let line of text.split('\n')){
+    line = line.trim();
+    if (!line || line.startsWith('#')) continue;
+    let m = line.match(strict);
+    if (m){
+      const [,,side,hitter,name,zone] = m;
+      const N = name.toUpperCase();
+      out.push(side.toUpperCase()==='OPP'
+        ? {side:'OPP', shot:NAME2OPP[N]||'DRIVE', target:zone.toUpperCase()}
+        : {side:'US', hitter:(hitter||'A').toUpperCase(), shot:NAME2CODE[N]||'P', target:zone.toUpperCase()});
+      continue;
+    }
+    m = line.match(loose);
+    if (m){
+      const [,,token,zone] = m;
+      const tk = token.toUpperCase(), N = tk.split('_').pop();
+      out.push(tk.includes('OPP')
+        ? {side:'OPP', shot:NAME2OPP[N]||'DRIVE', target:zone.toUpperCase()}
+        : {side:'US', hitter:'A', shot:NAME2CODE[N]||'P', target:zone.toUpperCase()});
+    }
+  }
+  return out;
+}
+
+/* ════════════════ 事件繫結與啟動 ════════════════ */
+function readSettings(){
+  return {
+    target: Math.max(1, +$('#setTarget').value || 11),
+    my: Math.max(0, +$('#setMy').value || 0),
+    oppScore: Math.max(0, +$('#setOpp').value || 0),
+  };
+}
+$('#btnStart').addEventListener('click', ()=>{
+  const s = readSettings();
+  if (s.my >= s.target || s.oppScore >= s.target){ log('⚠ 起始分數不可大於等於目標分數。','f-sys'); return; }
+  runMatch({...s, label:'隨機實戰模式', script:null});
+});
+$('#btnClassic').addEventListener('click', ()=>{
+  $('#setTarget').value = CLASSIC.target; $('#setMy').value = CLASSIC.my; $('#setOpp').value = CLASSIC.oppScore;
+  log(`🥇 <b>【${CLASSIC.title}】</b><br>你將扮演麟洋配的後場火力 A。比分 20:19 冠軍點——前 5 拍完全還原世紀對決，第 6 拍起球拍交到你手上！`,'f-ghost');
+  runMatch({target:CLASSIC.target, my:CLASSIC.my, oppScore:CLASSIC.oppScore,
+            label:CLASSIC.title, script:CLASSIC.script});
+});
+$('#btnExport').addEventListener('click', exportScript);
+$('#btnImport').addEventListener('click', ()=>{
+  const script = parseScript($('#scriptBox').value);
+  if (!script.length){ log('⚠ 劇本無法解析，請確認格式（例：Shot 1: OPP Serve -> L2）。','f-sys'); return; }
+  const s = readSettings();
+  if (s.my >= s.target || s.oppScore >= s.target){ log('⚠ 起始分數不可大於等於目標分數。','f-sys'); return; }
+  log(`📥 成功載入 ${script.length} 拍劇本，將作為首回合開局自動跑位！`,'f-ghost');
+  runMatch({...s, label:'匯入劇本挑戰', script});
+});
+$('#ghostToggle').addEventListener('change', e=>{
+  game.showHints = e.target.checked;
+  renderGhosts();
+  log(game.showHints ? '🔴 教練提示已開啟：幽靈區將以紅色光暈標示。'
+                     : '🕶️ 提示已隱藏：憑直覺判斷，賽後嚴格檢討。','f-sys');
+});
+/* ── 一分球回放控制 ── */
+$('#btnReplay').addEventListener('click', async ()=>{
+  if (!game.postFrames || game.replaying) return;
+  $('#collectBar').style.display = 'none';
+  await replayRally(game.postFrames);
+  $('#collectBar').style.display = '';
+});
+$('#rpPause').addEventListener('click', ()=>{
+  game.rpPaused = !game.rpPaused;
+  $('#rpPause').textContent = game.rpPaused ? '▶ 播放' : '⏸ 暫停';
+});
+$('#rpStop').addEventListener('click', ()=>{ game.replaying = false; game.rpPaused = false; });
+/* ── ⏸ 手動走位模式 ── */
+$('#manualToggle').addEventListener('change', e=>{
+  game.manualMode = e.target.checked;
+  log(game.manualMode
+    ? '⏸ 手動走位模式：時間靜止，佔位階段不再倒數，盡情思考。'
+    : '⏱ 恢復動態倒數：走位時間依對方球速壓縮，感受實戰壓迫！','f-sys');
+  if (game.phase==='position'){
+    if (game.manualMode && game.posTimer){
+      clearInterval(game.posTimer); game.posTimer=null;
+      $('#posTimerNum').textContent='⏸ 手動模式：時間靜止，想清楚再確認站位';
+      $('#posTimerNum').classList.remove('timer-panic');
+      $('#posTimerFill').style.width='100%';
+    }
+  }
+});
+$('#btnCloseModal').addEventListener('click',()=>$('#modalBack').classList.remove('show'));
+/* ── 第一階段：確認站位 ── */
+$('#btnConfirmPos').addEventListener('click',()=>{
+  if (game.phase!=='position' || !game.posResolve) return;
+  endPositioning({timeout:false});
+});
+/* ── 戰術庫 UI 事件 ── */
+$('#btnCollect').addEventListener('click',()=>{
+  $('#collectStep1').style.display='none';
+  $('#collectStep2').style.display='';
+});
+$('#btnSkipCollect').addEventListener('click',closeCollect);
+$$('.tier-btn').forEach(b=>b.addEventListener('click',()=>{
+  if (collectResolve) tacticsLib.addRally(b.dataset.tier, collectResolve.rallyLog);
+  closeCollect();
+}));
+$('#aiLevel').addEventListener('change',e=>{
+  game.aiLevel = e.target.value;
+  const msg = {
+    basic:'🟢 對手切換為【初級】：只會標準概率矩陣的老實人。',
+    mid:'🟡 對手切換為【中級】：開始偷學你收藏的初/中級戰術！',
+    high:'🔴 對手切換為【高級】：你的全部壓箱絕活，它都會拿來反擊你。走位也更嚴謹！',
+  }[game.aiLevel];
+  log(msg,'f-ghost');
+});
+$('#btnClearLib').addEventListener('click',()=>tacticsLib.clear());
+$('#coachToggle').addEventListener('change',e=>{
+  game.showCoach = e.target.checked;
+  if (game.phase==='position' && game.curSituation){
+    if (game.showCoach)
+      renderCoach(idealPositions(game.curSituation.shot, game.curSituation.cell));
+    else clearCoach();
+    updateVoice(game.curSituation.shot, game.curSituation.cell);
+  }
+  log(game.showCoach
+    ? '🟢 教練站位提示已開啟：綠色圓圈＋語音板將全程引導站位。'
+    : '🕶️ 教練站位提示已關閉：憑意識走位，賽後對照大師指南檢討。','f-sys');
+});
+$('#btnRematch').addEventListener('click',()=>{
+  $('#modalBack').classList.remove('show');
+  const s = readSettings();
+  if (s.my >= s.target || s.oppScore >= s.target){ $('#setMy').value=0; $('#setOpp').value=0; }
+  runMatch({...readSettings(), label:'隨機實戰模式', script:null});
+});
+
+/* 初始化 */
+buildCourt();
+rot.render(true); opp.render(true);
+movePiece(shuttleEl, 190, 350, true);
+game.showHints = $('#ghostToggle').checked;
+game.aiLevel = $('#aiLevel').value;
+game.showCoach = $('#coachToggle').checked;
+game.manualMode = $('#manualToggle').checked;
+tacticsLib.load();
+walkLib.load();
+build3D();
+</script>
+</body>
+</html>
